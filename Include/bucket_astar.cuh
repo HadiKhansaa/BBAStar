@@ -13,9 +13,7 @@
 
 #include "astar_helper.cuh"
 
-namespace cg = cooperative_groups;
-
-#define INF_FLT 1e20f  // A large float value representing infinity
+// #define INF_FLT 1e20f  // A large float value representing infinity
 #define MAX_NEIGHBORS 8        // 8-directional movement
 
 #define MAX_BINS 3000         // Maximum number of bins (adjust as needed)
@@ -28,58 +26,13 @@ namespace cg = cooperative_groups;
 #define TILE_WIDTH  16
 #define TILE_HEIGHT 16
 
-#define FRONTIER_SIZE 500
+#define FRONTIER_SIZE 512
+
+namespace cg = cooperative_groups;
 
 
 // Define BIN_SIZE based on the grid dimensions
 __device__ __constant__ float BIN_SIZE_DEVICE;
-
-// Atomic Min for float
-__device__ float atomicMinFloat(float* address, float val) {
-    float old = *address, assumed;
-    do {
-        assumed = old;
-        old = __int_as_float(atomicCAS((int*)address,
-                                       __float_as_int(assumed),
-                                       __float_as_int(fminf(val, assumed))));
-    } while (__float_as_int(assumed) != __float_as_int(old));
-    return old;
-}
-
-__device__ void wait(int cycles) {
-    clock_t start = clock();
-    clock_t now;
-    for (;;) {
-        now = clock();
-        clock_t cyclesPassed = now > start ? now - start : now + (0xffffffff - start);
-        if (cyclesPassed >= cycles) {
-            break;
-        }
-    }
-}
-
-// Node structure
-struct Node {
-    int id;
-    int g;
-    int h;
-    int f;
-    int parent;
-};
-
-// Heuristic function (Euclidean distance)
-__device__ __host__ int heuristic(int currentNodeId, int goalNodeId, int width) {
-    int xCurrent = currentNodeId % width;
-    int yCurrent = currentNodeId / width;
-    int xGoal = goalNodeId % width;
-    int yGoal = goalNodeId / width;
-
-    int dx = abs(xCurrent - xGoal);
-    int dy = abs(yCurrent - yGoal);
-
-    // return (dx + dy) * SCALE_FACTOR;
-    return sqrtf((float)(dx * dx + dy * dy))*SCALE_FACTOR;
-}
 
 // Kernel to initialize nodes
 __global__ void initializeNodes(Node* nodes, int width, int height) {
@@ -319,9 +272,7 @@ __global__ void aStarMultipleBuckets(
     int *grid, int width, int height, int goalNodeId, Node *nodes,
     int *openListBins, int *binCounts, unsigned long long *binBitMask,
     int *expansionBuffers, int *expansionCounts, bool *found,
-    int *path, int *pathLength, 
-    int binBitMaskSize, 
-    int K, 
+    int *path, int *pathLength, int binBitMaskSize, int K, 
     int *totalExpandedNodes, int* firstNonEmptyMask, int* lastNonEmptyMask)
 {
     // Cooperative groups for grid-wide sync

@@ -1,3 +1,72 @@
+#pragma once
+
+#define INF_FLT 1e20f  // A large float value representing infinity
+#define MAX_NEIGHBORS 8        // 8-directional movement
+
+#define MAX_BINS 3000         // Maximum number of bins (adjust as needed)
+#define MAX_BIN_SIZE 2000    // Maximum number of nodes per bin (adjust as needed)
+#define SCALE_FACTOR 1000   // Khansa is based (via the universal Axiom of Consistant-Basedness)
+
+#define SH_MAX_RANGE 15
+#define MAX_SHARED_BIN_SIZE 100
+
+#define TILE_WIDTH  16
+#define TILE_HEIGHT 16
+
+#define FRONTIER_SIZE 500
+
+__device__ void wait(int cycles) {
+    clock_t start = clock();
+    clock_t now;
+    for (;;) {
+        now = clock();
+        clock_t cyclesPassed = now > start ? now - start : now + (0xffffffff - start);
+        if (cyclesPassed >= cycles) {
+            break;
+        }
+    }
+}
+
+// Node structure
+struct Node {
+    int id;
+    int g;
+    int h;
+    int f;
+    int parent;
+};
+
+// bidirectional Node
+struct BiNode {
+    int id;
+    int g_forward;
+    int h_forward;
+    int f_forward;
+    int g_backward;
+    int h_backward;
+    int f_backward;
+    int parent_forward;
+    int parent_backward;
+};
+
+// Heuristic function (Euclidean distance)
+__device__ __host__ int heuristic(int currentNodeId, int goalNodeId, int width) {
+    int xCurrent = currentNodeId % width;
+    int yCurrent = currentNodeId / width;
+    int xGoal = goalNodeId % width;
+    int yGoal = goalNodeId / width;
+
+    int dx = abs(xCurrent - xGoal);
+    int dy = abs(yCurrent - yGoal);
+
+    // return (dx + dy) * SCALE_FACTOR;
+    return sqrtf((float)(dx * dx + dy * dy)) * SCALE_FACTOR;
+}
+
+
+
+
+
 /////////////////////////////////////////////////////////////////////////////////
 // Naive single-thread prefix sum over [start..end], inclusive.
 /////////////////////////////////////////////////////////////////////////////////
