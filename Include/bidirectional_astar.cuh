@@ -50,7 +50,6 @@ __device__ bool d_done_backward;
 __device__ int globalBestCost;
 __device__ BiNode globalBestNode;
 
-
 // global variables for the active bucket range
 __device__ int global_forward_bucketRangeStart;
 __device__ int global_forward_bucketRangeEnd;
@@ -59,6 +58,9 @@ __device__ int global_forward_totalElementsInRange;
 __device__ int global_backward_bucketRangeStart;
 __device__ int global_backward_bucketRangeEnd;
 __device__ int global_backward_totalElementsInRange;
+
+__device__ int forward_totalNbElementsExpansionBuffer = 0;
+__device__ int backward_totalNbElementsExpansionBuffer = 0;
 
 __global__ void initializeBiNodes(BiNode* nodes, int width, int height) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -75,6 +77,12 @@ __global__ void initializeBiNodes(BiNode* nodes, int width, int height) {
     }
 }
 
+enum ThreadAssignment {
+    FORWARD = 1,
+    BACKWARD = 0,
+    UNASSIGNNED = -1
+};
+
 __global__ void biAStarMultipleBucketsSingleKernel(
     int *grid, int width, int height,    // grid dimensions and obstacle grid
     int startNodeId, int targetNodeId,                   // for forward search, this is the goal; for backward, the start
@@ -89,29 +97,23 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     int binBitMaskSize, int K, 
     int *totalExpandedNodes, int* firstNonEmptyMask, int* lastNonEmptyMask)
 {
-    // Determine search direction based on block index.
-    // Odd-indexed blocks: forward search (forward = true)
-    // Even-indexed blocks: backward search (forward = false)
-    bool forward = (blockIdx.x % 2 == 1);
+    // thread local variables for direction of search
+    ThreadAssignment threadAssignment = UNASSIGNNED; // to be determined for each thread
+    int bucketRangeStart; // to be determined for each thread
+    int bucketRangeEnd;   // to be determined for each thread
+    int totalElementsInRange; // to be determined for each thread
+    int *binCountsPtr; // to be determined for each thread
+    unsigned long long *binBitMaskPtr; // to be determined for each thread
+    int *openListBinsPtr; // to be determined for each thread
+    int *expansionBuffersPtr; // to be determined for each thread
+    int *expansionCountsPtr; // to be determined for each thread
 
-    // Select the proper set of open list arrays based on the search direction.
-    int *openListBinsPtr       = forward ? forward_openListBins      : backward_openListBins;
-    int *binCountsPtr          = forward ? forward_binCounts         : backward_binCounts;
-    unsigned long long *binBitMaskPtr = forward ? forward_binBitMask  : backward_binBitMask;
-    int *expansionBuffersPtr   = forward ? forward_expansionBuffers  : backward_expansionBuffers;
-    int *expansionCountsPtr    = forward ? forward_expansionCounts   : backward_expansionCounts;
-    
     // Cooperative groups for grid-wide synchronization.
     cg::grid_group gridGroup = cg::this_grid();
 
     // Linear thread ID across the entire grid.
     int idx = blockIdx.x * blockDim.x + threadIdx.x; 
-    int totalThreads = gridGroup.size();
-
-    // Declare shared bucket range variables per block.
-    __shared__ int sh_bucketRangeStart;
-    __shared__ int sh_bucketRangeEnd;
-    __shared__ int sh_totalElementsInRange;    
+    int totalThreads = gridGroup.size();   
 
     // One-time init on the first thread of the first block (global flags d_done and d_localFound assumed).
     if (threadIdx.x == 0 && blockIdx.x == 0) {
@@ -129,12 +131,16 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         // printf("forward: %d\n", forward);
         // Thread 0 of block 0 computes the active bucket range forward.
         // Thread 1 of block 0 computes the active bucket range backward.
-        if (threadIdx.x == 0 && (blockIdx.x == 0 || blockIdx.x == 1)) {
-            int bucketRangeStart = -1;
-            int bucketRangeEnd   = -1;
-            // sh_totalElementsInRange = 0; // still global, if needed.
+        if (blockIdx.x == 0 && (threadIdx.x == 0 || threadIdx.x == 1)) {
+            // initialization for each thread
+            bucketRangeStart = -1;
+            bucketRangeEnd   = -1;
+            totalElementsInRange = 0;
 
-            __volatile int elementsAccumulated = 0;
+            // temporarly assigned pointers will change later for each thread
+            binCountsPtr = threadIdx.x == 0 ? forward_binCounts : backward_binCounts;
+            binBitMaskPtr = threadIdx.x == 0 ? forward_binBitMask : backward_binBitMask;
+
             bool done = false;
             for (int i = 0; i <= binBitMaskSize && !done; ++i) {
                 unsigned long long tmpMask = binBitMaskPtr[i];
@@ -149,8 +155,8 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                     if (bucketRangeStart == -1)
                         bucketRangeStart = bucket;
                     int countHere = binCountsPtr[bucket];
-                    if (elementsAccumulated + countHere < K) {
-                        elementsAccumulated += countHere;
+                    if (totalElementsInRange + countHere < K) {
+                        totalElementsInRange += countHere;
                         bucketRangeEnd = bucket;
                     } else {
                         bucketRangeEnd = bucket;
@@ -158,85 +164,90 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                     }
                 }
             }
-            if (bucketRangeStart == bucketRangeEnd && elementsAccumulated == 0 &&
+            if (bucketRangeStart == bucketRangeEnd && totalElementsInRange == 0 &&
                 bucketRangeStart + 1 < MAX_BINS && binCountsPtr[bucketRangeStart + 1] > 0)
-                sh_totalElementsInRange = elementsAccumulated;
+                totalElementsInRange = binCountsPtr[bucketRangeStart + 1];
             // else if (elementsAccumulated == 0)
             //     d_done = true;
             // else
             //     sh_totalElementsInRange = elementsAccumulated;
             
             // 2 flags for forward pass and backward pass
-            if(elementsAccumulated == 0 && blockIdx.x == 1)
-            {
+            else if(totalElementsInRange == 0 && threadIdx.x == 0)
                 d_done_forward = true;
-            }
-
-            if(elementsAccumulated == 0 && blockIdx.x == 0)
-            {
+            
+            else if(totalElementsInRange == 0 && threadIdx.x == 1)
                 d_done_backward = true;
-            }
             
             // broadcast to all other blocks
-            if (blockIdx.x == 1 && elementsAccumulated > 0)
+            if (threadIdx.x == 0 && totalElementsInRange > 0)
             {
                 global_forward_bucketRangeStart = bucketRangeStart;
                 global_forward_bucketRangeEnd = bucketRangeEnd;
-                global_forward_totalElementsInRange = elementsAccumulated;
+                global_forward_totalElementsInRange = totalElementsInRange;
             }
-            else if (blockIdx.x == 0 && elementsAccumulated > 0)
+            else if (threadIdx.x == 1 && totalElementsInRange > 0)
             {
                 global_backward_bucketRangeStart = bucketRangeStart;
                 global_backward_bucketRangeEnd = bucketRangeEnd;
-                global_backward_totalElementsInRange = elementsAccumulated;
+                global_backward_totalElementsInRange = totalElementsInRange;
             }
 
             // active elements forward
-            if(forward)
+// #ifdef DEBUG
+            if(threadIdx.x == 0)
             {
-                printf("Active elements forward: %d\n", elementsAccumulated);
-                printf("Bucket range forward: %d - %d\n", sh_bucketRangeStart, sh_bucketRangeEnd);
+                printf("Active elements forward: %d\n", totalElementsInRange);
+                printf("Bucket range forward: %d - %d\n", global_forward_bucketRangeStart, global_forward_bucketRangeEnd);
 
             }
             else
             {
-                printf("Active elements backward: %d\n", elementsAccumulated);
-                printf("Bucket range backward: %d - %d\n", sh_bucketRangeStart, sh_bucketRangeEnd);
+                printf("Active elements backward: %d\n", totalElementsInRange);
+                printf("Bucket range backward: %d - %d\n", global_backward_bucketRangeStart, global_backward_bucketRangeEnd);
             }
 
-            wait(10000000000);
-        }
-
-        gridGroup.sync(); // sync all blocks
-        // all blocks should copy the shared bucket range variables into shared memory
-        if(forward && threadIdx.x == 0)
-        {
-            sh_bucketRangeStart = global_forward_bucketRangeStart;
-            sh_bucketRangeEnd = global_forward_bucketRangeEnd;
-            sh_totalElementsInRange = global_forward_totalElementsInRange;
-        }
-
-        if (!forward && threadIdx.x == 0)
-        {
-            sh_bucketRangeStart = global_backward_bucketRangeStart;
-            sh_bucketRangeEnd = global_backward_bucketRangeEnd;
-            sh_totalElementsInRange = global_backward_totalElementsInRange;
+            wait(1000000000);
+// #endif
         }
 
         gridGroup.sync(); // sync all blocks
         if (d_done_forward && d_done_backward)
             break;
 
-        // Map this thread to a (bucket, node, neighbor) tuple using the shared bucket range.
+        // Assignment of thread-specific variables
+        // first 8 * totalElementsInRange threads are responsible for forward search
+        if(threadIdx.x < global_forward_totalElementsInRange * 8)
+            threadAssignment = FORWARD;
+        // second 8 * totalElementsInRange threads are responsible for backward search
+        else if (threadIdx.x < global_forward_totalElementsInRange * 8 + global_backward_totalElementsInRange * 8)
+            threadAssignment = BACKWARD;
+
+        // decide thread <-> direction
+        bucketRangeStart = threadAssignment == FORWARD ? global_forward_bucketRangeStart : global_backward_bucketRangeStart;
+        bucketRangeEnd = threadAssignment == FORWARD ? global_forward_bucketRangeEnd : global_backward_bucketRangeEnd;
+
+        openListBinsPtr       = threadAssignment == FORWARD ? forward_openListBins      : backward_openListBins;
+        expansionBuffersPtr   = threadAssignment == FORWARD ? forward_expansionBuffers  : backward_expansionBuffers;
+        expansionCountsPtr    = threadAssignment == FORWARD ? forward_expansionCounts   : backward_expansionCounts;
+        binCountsPtr          = threadAssignment == FORWARD ? forward_binCounts         : backward_binCounts;
+        binBitMaskPtr         = threadAssignment == FORWARD ? forward_binBitMask        : backward_binBitMask;
+
+        // Work Assignment: each 8 threads are responsible for one node in the open list cocnsecutively
         int assignedBucket = -1;
         int threadPosition = idx; // linear index among (node, neighbor) pairs.
-        for (int b = global_backward_bucketRangeStart; b <= global_forward_bucketRangeEnd; ++b) {
-            int bucketSize = binCountsPtr[b] * MAX_NEIGHBORS;
-            if (threadPosition < bucketSize) {
-                assignedBucket = b;
-                break;
+        if(threadAssignment != UNASSIGNNED)
+        {
+            int assignedBucket = -1;
+            int threadPosition = idx; // linear index among (node, neighbor) pairs.
+            for (int b = bucketRangeStart; b <= bucketRangeEnd; ++b) {
+                int bucketSize = binCountsPtr[b] * MAX_NEIGHBORS;
+                if (threadPosition < bucketSize) {
+                    assignedBucket = b;
+                    break;
+                }
+                threadPosition -= bucketSize;
             }
-            threadPosition -= bucketSize;
         }
         
         if (assignedBucket != -1) {
@@ -250,7 +261,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             BiNode currentNode = nodes[currentNodeId];
 
             // Early pruning: skip if the current node’s f-value is not promising.
-            int currentF = forward ? currentNode.f_forward : currentNode.f_backward;
+            int currentF = threadAssignment == FORWARD ? currentNode.f_forward : currentNode.f_backward;
             if (currentF < globalBestCost)
             {
                 // 8-direction neighbor offsets.
@@ -271,18 +282,18 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                     if (grid[neighborId] == 0) {  // if passable
                         bool isDiagonal = (abs(dx) + abs(dy) == 2);
                         int moveCost = isDiagonal ? 1414 : 1000;
-                        int tentativeG = (forward ? currentNode.g_forward : currentNode.g_backward) + moveCost;
+                        int tentativeG = (threadAssignment == FORWARD ? currentNode.g_forward : currentNode.g_backward) + moveCost;
 
                         // Atomically update the neighbor's cost using the appropriate field.
                         int oldG;
-                        if (forward) {
+                        if (threadAssignment == FORWARD) {
                             oldG = atomicMin(&nodes[neighborId].g_forward, tentativeG);
                         } else {
                             oldG = atomicMin(&nodes[neighborId].g_backward, tentativeG);
                         }
                         if (tentativeG < oldG) {
                             // Update neighbor's fields accordingly.
-                            if (forward) {
+                            if (threadAssignment == FORWARD) {
                                 nodes[neighborId].id = neighborId;
                                 nodes[neighborId].parent_forward = currentNodeId;
                                 nodes[neighborId].h_forward = heuristic(neighborId, targetNodeId, width);
@@ -297,7 +308,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                             }
 
                             // Check if this neighbor has already been reached from the opposite search.
-                            if (forward) {
+                            if (threadAssignment == FORWARD) {
                                 if (nodes[neighborId].g_backward < INT_MAX) {
                                     int candidateCost = nodes[neighborId].g_forward + nodes[neighborId].g_backward;
                                     int oldCost = atomicMin(&globalBestCost, candidateCost);
@@ -330,16 +341,17 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                             }
 
                             // Compute the bin for the neighbor based on its updated f-value.
-                            int newF = forward ? nodes[neighborId].f_forward : nodes[neighborId].f_backward;
-                            
-                            printf("New f-value: %d\n", newF);
+                            int newF = threadAssignment == FORWARD ? nodes[neighborId].f_forward : nodes[neighborId].f_backward;
+#ifdef DEBUG
+                            printf("f-value of expanded node: %d\n", newF);
+#endif
                             int minFValue = 1414 * width;
                             int adjustedF = newF - minFValue;
                             int binForNghbr = (int)(adjustedF / BUCKET_F_RANGE);
                             binForNghbr = max(0, min(binForNghbr, MAX_BINS - 1));
 
                             // Insert neighbor into the expansion buffer or open list bins.
-                            if (binForNghbr >= global_backward_bucketRangeStart && binForNghbr <= global_forward_bucketRangeEnd) {
+                            if (binForNghbr >= bucketRangeStart && binForNghbr <= bucketRangeEnd) {
                                 int pos = atomicAdd(&expansionCountsPtr[binForNghbr], 1);
                                 int offset = binForNghbr * MAX_BIN_SIZE + pos;
                                 expansionBuffersPtr[offset] = neighborId;
@@ -365,11 +377,35 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         }
         gridGroup.sync();
 
-        // Merge expansion buffers into the open list.
-        if (blockIdx.x == 0 || blockIdx.x == 1) {
-            int start = forward ? global_forward_bucketRangeStart : global_backward_bucketRangeStart;
-            int end = forward ? global_forward_bucketRangeEnd : global_backward_bucketRangeEnd;
-            for (int bucket = start; bucket <= end; ++bucket) {
+        // Count the total number of elements in the expansion buffer
+        if(threadIdx.x == 0 && blockIdx.x == 0)
+        {
+            for (int bucket = bucketRangeStart; bucket <= bucketRangeEnd; ++bucket) {
+                forward_totalNbElementsExpansionBuffer += forward_expansionCounts[bucket];
+            }
+        }
+        else if(threadIdx.x == 1 && blockIdx.x == 0)
+        {
+            for (int bucket = bucketRangeStart; bucket <= bucketRangeEnd; ++bucket) {
+                backward_totalNbElementsExpansionBuffer += backward_expansionCounts[bucket];
+            }
+        }
+
+        gridGroup.sync();
+
+        // first forward_totalNbElementsExpansionBuffer threads are responsible for forward copy
+        // if(threadIdx.x < forward_totalNbElementsExpansionBuffer)
+        if(blockIdx.x == 0) // block 0 is responsible for copying forward pass
+        {
+            expansionCountsPtr = forward_expansionCounts;
+            openListBinsPtr = forward_openListBins;
+            binCountsPtr = forward_binCounts;
+            binBitMaskPtr = forward_binBitMask;
+            expansionBuffersPtr = forward_expansionBuffers;
+            bucketRangeStart = global_forward_bucketRangeStart;
+            bucketRangeEnd = global_forward_bucketRangeEnd;
+
+            for (int bucket = bucketRangeStart; bucket <= bucketRangeEnd; ++bucket) {
                 int eCount = expansionCountsPtr[bucket];
                 if (eCount > 0) {
                     binCountsPtr[bucket] = eCount;
@@ -383,20 +419,37 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                         int maskIndex = bucket / 64;
                         unsigned long long m = ~(1ULL << (bucket % 64));
                         atomicAnd(&binBitMaskPtr[maskIndex], m);
+                    }
+                }
+                __syncthreads();
+                expansionCountsPtr[bucket] = 0;
+            }
+        }
+        // else if (threadIdx.x < forward_totalNbElementsExpansionBuffer + backward_totalNbElementsExpansionBuffer)
+        else if(blockIdx.x == 1) // block 1 is responsible for copying backward pass
+        {
+            expansionCountsPtr = backward_expansionCounts;
+            openListBinsPtr = backward_openListBins;
+            binCountsPtr = backward_binCounts;
+            binBitMaskPtr = backward_binBitMask;
+            expansionBuffersPtr = backward_expansionBuffers;
+            bucketRangeStart = global_backward_bucketRangeStart;
+            bucketRangeEnd = global_backward_bucketRangeEnd;
 
-                        // firstNonEmptyMask and lastNonEmptyMask are not updated here.
-                        // if (binBitMaskPtr[maskIndex] == 0 && maskIndex == *firstNonEmptyMask) {
-                        //     int newIndex = maskIndex + 1;
-                        //     while (newIndex <= *lastNonEmptyMask && binBitMaskPtr[newIndex] == 0ULL)
-                        //         newIndex++;
-                        //     atomicMax(firstNonEmptyMask, newIndex);
-                        // }
-                        // if (binBitMaskPtr[maskIndex] == 0 && maskIndex == *lastNonEmptyMask) {
-                        //     int newIndex = maskIndex - 1;
-                        //     while (newIndex >= *firstNonEmptyMask && binBitMaskPtr[newIndex] == 0ULL)
-                        //         newIndex--;
-                        //     atomicMin(lastNonEmptyMask, newIndex);
-                        // }
+            for (int bucket = bucketRangeStart; bucket <= bucketRangeEnd; ++bucket) {
+                int eCount = expansionCountsPtr[bucket];
+                if (eCount > 0) {
+                    binCountsPtr[bucket] = eCount;
+                    for (int i = threadIdx.x; i < eCount; i += blockDim.x) {
+                        int offset = bucket * MAX_BIN_SIZE + i;
+                        openListBinsPtr[offset] = expansionBuffersPtr[offset];
+                    }
+                } else {
+                    if (threadIdx.x == 0) {
+                        binCountsPtr[bucket] = 0;
+                        int maskIndex = bucket / 64;
+                        unsigned long long m = ~(1ULL << (bucket % 64));
+                        atomicAnd(&binBitMaskPtr[maskIndex], m);
                     }
                 }
                 __syncthreads();
@@ -404,37 +457,40 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             }
         }
 
-
-        // Merge expansion buffers into the open list for the designated block:
-        // For forward search: if (forward && blockIdx.x == 0)
-        // For backward search: if (!forward && blockIdx.x == 1)
-        // if (blockIdx.x == 0 || blockIdx.x == 1) {
-        //     for (int bucket = global_backward_bucketRangeStart; bucket <= global_forward_bucketRangeEnd; ++bucket) {
-        //         // Read the expansion count for this bucket.
+        // Merge expansion buffers into the open list.
+        // if (blockIdx.x == 0) {
+        //     for (int bucket = bucketRangeStart; bucket <= bucketRangeEnd; ++bucket) {
         //         int eCount = expansionCountsPtr[bucket];
-        //         // Update the open list bin count.
-        //         binCountsPtr[bucket] = eCount;
-                
-        //         // Parallel copy: each thread copies a portion of the expansion buffer.
-        //         for (int i = threadIdx.x; i < eCount; i += blockDim.x) {
-        //             int offset = bucket * MAX_BIN_SIZE + i;
-        //             openListBinsPtr[offset] = expansionBuffersPtr[offset];
+        //         if (eCount > 0) {
+        //             binCountsPtr[bucket] = eCount;
+        //             for (int i = threadIdx.x; i < eCount; i += blockDim.x) {
+        //                 int offset = bucket * MAX_BIN_SIZE + i;
+        //                 openListBinsPtr[offset] = expansionBuffersPtr[offset];
+        //             }
+        //         } else {
+        //             if (threadIdx.x == 0) {
+        //                 binCountsPtr[bucket] = 0;
+        //                 int maskIndex = bucket / 64;
+        //                 unsigned long long m = ~(1ULL << (bucket % 64));
+        //                 atomicAnd(&binBitMaskPtr[maskIndex], m);
+
+        //                 // firstNonEmptyMask and lastNonEmptyMask are not updated here.
+        //                 // if (binBitMaskPtr[maskIndex] == 0 && maskIndex == *firstNonEmptyMask) {
+        //                 //     int newIndex = maskIndex + 1;
+        //                 //     while (newIndex <= *lastNonEmptyMask && binBitMaskPtr[newIndex] == 0ULL)
+        //                 //         newIndex++;
+        //                 //     atomicMax(firstNonEmptyMask, newIndex);
+        //                 // }
+        //                 // if (binBitMaskPtr[maskIndex] == 0 && maskIndex == *lastNonEmptyMask) {
+        //                 //     int newIndex = maskIndex - 1;
+        //                 //     while (newIndex >= *firstNonEmptyMask && binBitMaskPtr[newIndex] == 0ULL)
+        //                 //         newIndex--;
+        //                 //     atomicMin(lastNonEmptyMask, newIndex);
+        //                 // }
+        //             }
         //         }
         //         __syncthreads();
-                
-        //         // If no elements were added, clear the corresponding bit in the bin bitmask.
-        //         if (eCount == 0 && threadIdx.x == 0) {
-        //             int maskIndex = bucket / 64;
-        //             unsigned long long clearMask = ~(1ULL << (bucket % 64));
-        //             atomicAnd(&binBitMaskPtr[maskIndex], clearMask);
-        //         }
-        //         __syncthreads();
-                
-        //         // Reset the expansion count for this bucket.
-        //         if (threadIdx.x == 0) {
-        //             expansionCountsPtr[bucket] = 0;
-        //         }
-        //         __syncthreads();
+        //         expansionCountsPtr[bucket] = 0;
         //     }
         // }
 
@@ -444,41 +500,16 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         // gridGroup.sync();
     } // end while(!d_done)
 
-    // When done, check best path.
-    // if (blockIdx.x == 0 && threadIdx.x == 0) {
-    //     *pathLength = 0;
-    //     if (globalBestCost == INT_MAX) {
-    //         *found = false;
-    //     } else {
-    //         *found = true;
-    //         int currentId = globalBestNode.id;
-    //         while (currentId != -1) {
-    //             path[atomicAdd(pathLength, 1)] = currentId;
-    //             if (forward) {
-    //                 currentId = nodes[currentId].parent_forward;
-    //             } else {
-    //                 currentId = nodes[currentId].parent_backward;
-    //             }
-    //         }
-    //     }
-    // }
-
-
-
     // When done, reconstruct the complete path.
-    // The meeting node (globalBestNode.id) lies somewhere along the path.
-    // We first follow the forward parent pointers from the meeting node back to the start,
-    // then follow the backward parent pointers from the meeting node toward the goal.
-    // Finally, we reverse the forward portion to get the correct order from start to meeting,
-    // reverse the backward portion to get meeting to goal in proper order,
-    // and then concatenate them (omitting the duplicate meeting node).
-
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         if (globalBestCost == INT_MAX) {
             *found = false;
             *pathLength = 0;
         } else {
             *found = true;
+            printf("Path found\n");
+            printf("Meeting node: (%d, %d)\n", globalBestNode.id/8, globalBestNode.id%8);
+            printf("cost: %d\n", globalBestCost);
             
             // // Define a maximum path length (adjust as needed).
             // // int MAX_PATH_LENGTH = 10000000;

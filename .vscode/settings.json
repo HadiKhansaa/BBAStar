@@ -54,6 +54,7 @@
         "thread": "cpp",
         "cinttypes": "cpp",
         "typeinfo": "cpp",
-        "xlocale": "cpp"
+        "xlocale": "cpp",
+        "mutex": "cpp"
     }
 }

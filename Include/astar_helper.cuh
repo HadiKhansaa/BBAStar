@@ -63,10 +63,6 @@ __device__ __host__ int heuristic(int currentNodeId, int goalNodeId, int width) 
     return sqrtf((float)(dx * dx + dy * dy)) * SCALE_FACTOR;
 }
 
-
-
-
-
 /////////////////////////////////////////////////////////////////////////////////
 // Naive single-thread prefix sum over [start..end], inclusive.
 /////////////////////////////////////////////////////////////////////////////////
