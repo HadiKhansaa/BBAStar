@@ -236,10 +236,13 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         // Work Assignment: each 8 threads are responsible for one node in the open list cocnsecutively
         int assignedBucket = -1;
         int threadPosition = idx; // linear index among (node, neighbor) pairs.
+        int assignmentOffset = 0;
+        if(threadAssignment == BACKWARD)
+            assignmentOffset = global_forward_totalElementsInRange * 8;
         if(threadAssignment != UNASSIGNNED)
         {
             int assignedBucket = -1;
-            int threadPosition = idx; // linear index among (node, neighbor) pairs.
+            int threadPosition = idx - assignmentOffset; // linear index among (node, neighbor) pairs.
             for (int b = bucketRangeStart; b <= bucketRangeEnd; ++b) {
                 int bucketSize = binCountsPtr[b] * MAX_NEIGHBORS;
                 if (threadPosition < bucketSize) {
