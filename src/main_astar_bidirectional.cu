@@ -273,10 +273,10 @@ int main(int argc, char** argv) {
     auto startTime = std::chrono::high_resolution_clock::now();
 
     // --- Set grid/block dimensions for kernel launch ---
-    int frontierSize = 512;
+    int frontierSize = 256;
     int threadsPerBlock = 256;
-    // int totalThreadsKernel = frontierSize * 16;
-    int totalThreadsKernel = 30000;
+    int totalThreadsKernel = frontierSize * 16;
+    // int totalThreadsKernel = 30000;
     int numBlocks = (totalThreadsKernel + threadsPerBlock - 1) / threadsPerBlock;
     dim3 gridDim(numBlocks);
     dim3 blockDim(threadsPerBlock);
@@ -319,40 +319,9 @@ int main(int argc, char** argv) {
         (void *)&d_forward_lastNonEmptyMask
     };
 
-    // For the backward search, pass forward = false and target = startNodeId.
-    // void *kernelArgsBackward[] = {
-    //     (void *)&falseVariable,                       // backward search flag
-    //     (void *)&d_grid,
-    //     (void *)&width,
-    //     (void *)&height,
-    //     (void *)&startNodeId,                 // target node for backward search
-    //     (void *)&d_nodes,
-    //     (void *)&d_backward_openListBins,
-    //     (void *)&d_backward_binCounts,
-    //     (void *)&d_backward_binBitMask,
-    //     (void *)&d_backward_expansionBuffers,
-    //     (void *)&d_backward_expansionCounts,
-    //     (void *)&d_forward_openListBins,
-    //     (void *)&d_forward_binCounts,
-    //     (void *)&d_forward_binBitMask,
-    //     (void *)&d_forward_expansionBuffers,
-    //     (void *)&d_forward_expansionCounts,
-    //     (void *)&d_found,
-    //     (void *)&d_path,
-    //     (void *)&d_pathLength,
-    //     (void *)&binBitMaskSize,
-    //     (void *)&frontierSize,
-    //     (void *)&d_totalExpandedNodes,
-    //     (void *)&d_backward_firstNonEmptyMask,
-    //     (void *)&d_backward_lastNonEmptyMask
-    // };
-
     // --- Launch the forward and backward kernels concurrently ---
     CUDA_CHECK(cudaLaunchCooperativeKernel((void *)biAStarMultipleBucketsSingleKernel, gridDim, blockDim, kernelArgsForward, 0, forwardStream));
     CUDA_KERNEL_CHECK();
-
-    // CUDA_CHECK(cudaLaunchCooperativeKernel((void *)biAStarMultipleBuckets, gridDim, blockDim, kernelArgsBackward, 0, backwardStream));
-    // CUDA_KERNEL_CHECK();
 
     // Synchronize both streams
     CUDA_CHECK(cudaStreamSynchronize(forwardStream));
