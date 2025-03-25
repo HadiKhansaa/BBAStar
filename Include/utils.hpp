@@ -9,7 +9,7 @@ std::string yellow = "\033[33m";
 std::string red = "\033[31m";
 std::string blue = "\033[34m";
 std::string reset = "\033[0m";
-
+std::string purple = "\033[35m";
 
 void writeArrayToFile(int* array, int arraySize, string filename) {
     // Open the file for writing
