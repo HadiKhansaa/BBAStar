@@ -1,6 +1,8 @@
 #pragma once
 #include "grid_generation.hpp"
 #include "bidirectional_astar.cuh"
+#include "utils.hpp"
+
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -244,13 +246,10 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMalloc((void**)&d_totalExpandedNodes, sizeof(int)));
     CUDA_CHECK(cudaMemset(d_totalExpandedNodes, 0, sizeof(int)));
 
-    // --- Initialize global control variables (assumed to be device symbols) ---
-    int zeroInt = 0;
-    bool falseBool = false;
-    // CUDA_CHECK(cudaMemcpyToSymbol(d_currentBin, &zeroInt, sizeof(int)));
-    CUDA_CHECK(cudaMemcpyToSymbol(d_done_forward, &falseBool, sizeof(bool)));
-    CUDA_CHECK(cudaMemcpyToSymbol(d_done_backward, &falseBool, sizeof(bool)));
-    // CUDA_CHECK(cudaMemcpyToSymbol(d_localFound, &falseBool, sizeof(bool)));
+    // --- Allocate array of nodes expanded to track expanded nodes
+    int *d_expandedNodes;
+    CUDA_CHECK(cudaMalloc((void**)&d_expandedNodes, gridSize * sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_expandedNodes, -1, gridSize * sizeof(int)));
 
     // --- Initialize global best cost for bidirectional search ---
     int h_globalBestCost = INT_MAX; // an arbitrarily high value
@@ -286,9 +285,6 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaStreamCreate(&forwardStream));
     CUDA_CHECK(cudaStreamCreate(&backwardStream));
 
-    bool trueVariable = true;
-    bool falseVariable = false;
-
     // --- Prepare kernel arguments for the bidirectional kernel ---
     // For the forward search, pass forward = true and target = goalNodeId.
     void *kernelArgsForward[] = {
@@ -315,6 +311,7 @@ int main(int argc, char** argv) {
         (void *)&binBitMaskSize,
         (void *)&frontierSize,
         (void *)&d_totalExpandedNodes,
+        (void *)&d_expandedNodes,
         (void *)&d_forward_firstNonEmptyMask,
         (void *)&d_forward_lastNonEmptyMask
     };
@@ -361,22 +358,30 @@ int main(int argc, char** argv) {
         }
         std::cout << "Path found with length " << h_pathLength 
                   << " and total cost " << totalCost << std::endl;
-        std::cout << "Execution time (Bidirectional A* kernel): " 
-                  << elapsedSeconds.count() << " seconds" << std::endl;
+
+        std::cout << green << "Execution time (Bidirectional A* kernel): " 
+                  << elapsedSeconds.count() << " seconds" << reset << std::endl;
 
         int h_totalExpandedNodes;
         cudaMemcpy(&h_totalExpandedNodes, d_totalExpandedNodes, sizeof(int), cudaMemcpyDeviceToHost);
 
-        std::cout << "Total number of expanded nodes: " << h_totalExpandedNodes << std::endl;
+        int* h_expandedNodes = (int*)malloc(gridSize * sizeof(int));
+        cudaMemcpy(h_expandedNodes, d_expandedNodes, gridSize * sizeof(int), cudaMemcpyDeviceToHost);
+
+        // write the path and expanded nodes to files
+        // writeArrayToFile(h_path, h_pathLength, "path.txt");
+        // writeArrayToFile(h_expandedNodes, gridSize, "expanded_nodes.txt");
+
+        std::cout << blue << "Total number of expanded nodes: " << h_totalExpandedNodes << reset << std::endl;
     } else {
         std::cout << "Path not found." << std::endl;
-        std::cout << "Execution time (Bidirectional A* kernel): " 
-                  << elapsedSeconds.count() << " seconds" << std::endl;
+        std::cout << green << "Execution time (Bidirectional A* kernel): " 
+                  << elapsedSeconds.count() << " seconds" << reset << std::endl;
 
         int h_totalExpandedNodes;
         cudaMemcpy(&h_totalExpandedNodes, d_totalExpandedNodes, sizeof(int), cudaMemcpyDeviceToHost);
 
-        std::cout << "Total number of expanded nodes: " << h_totalExpandedNodes << std::endl;
+        std::cout << blue << "Total number of expanded nodes: " << h_totalExpandedNodes << reset << std::endl;
     }
 
     // --- Cleanup device memory ---

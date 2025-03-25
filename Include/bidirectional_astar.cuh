@@ -85,7 +85,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     int *backward_expansionBuffers, int *backward_expansionCounts,
     bool *found, int *path, int *pathLength,
     int binBitMaskSize, int frontierSize, 
-    int *totalExpandedNodes, int* firstNonEmptyMask, int* lastNonEmptyMask)
+    int *totalExpandedNodes, int* expandedNodes, int* firstNonEmptyMask, int* lastNonEmptyMask)
 {
     // thread local variables for direction of search
     ThreadAssignment threadAssignment = UNASSIGNNED; // to be determined for each thread
@@ -233,11 +233,12 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         
         if (assignedBucket != -1) {
             // Count this expansion.
-            atomicAdd(totalExpandedNodes, 1);
 
             int nodeIndex     = threadPosition / MAX_NEIGHBORS;  
             int neighborIndex = threadPosition % MAX_NEIGHBORS;  
 
+            expandedNodes[atomicAdd(totalExpandedNodes, 1)] = nodeIndex;
+            
             int currentNodeId = openListBinsPtr[assignedBucket * MAX_BIN_SIZE + nodeIndex];
             BiNode currentNode = nodes[currentNodeId];
 
@@ -437,52 +438,14 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             printf("Path found\n");
             printf("Meeting node: (%d, %d)\n", globalBestNode.id/width, globalBestNode.id%width);
             printf("cost: %d\n", globalBestCost/SCALE_FACTOR);
-            
-            // Define a maximum path length (adjust as needed).
-            // int MAX_PATH_LENGTH = 10000000;
-            // __shared__ int forwardBuffer[MAX_PATH_LENGTH];
-            // __shared__ int backwardBuffer[MAX_PATH_LENGTH];
-            // int fCount = 0, bCount = 0;
-            
-            // // Reconstruct forward chain: from meeting node back to start.
-            // // (Follow parent's forward pointers.)
-            // int cur = globalBestNode.id;
-            // while (cur != -1 && fCount < MAX_PATH_LENGTH) {
-            //     forwardBuffer[fCount++] = cur;
-            //     cur = nodes[cur].parent_forward;
-            // }
-            // // Now reverse forwardBuffer so that it goes from start to meeting.
-            // __shared__ int forwardPath[MAX_PATH_LENGTH];
-            // for (int i = 0; i < fCount; i++) {
-            //     forwardPath[i] = forwardBuffer[fCount - 1 - i];
-            // }
-            
-            // // Reconstruct backward chain: from meeting node toward goal.
-            // // (Follow parent's backward pointers.)
-            // // We skip the meeting node here (to avoid duplicate) and start with its backward parent.
-            // cur = nodes[globalBestNode.id].parent_backward;
-            // while (cur != -1 && bCount < MAX_PATH_LENGTH) {
-            //     backwardBuffer[bCount++] = cur;
-            //     cur = nodes[cur].parent_backward;
-            // }
-            // // Reverse backwardBuffer so that it goes from meeting to goal.
-            // __shared__ int backwardPath[MAX_PATH_LENGTH];
-            // for (int i = 0; i < bCount; i++) {
-            //     backwardPath[i] = backwardBuffer[bCount - 1 - i];
-            // }
-            
-            // // Merge the two parts into the final path:
-            // int totalPathLength = fCount + bCount;
-            // *pathLength = totalPathLength;
-            // // Write forward part: from start to meeting.
-            // for (int i = 0; i < fCount; i++) {
-            //     path[i] = forwardPath[i];
-            // }
-            // // Write backward part: from meeting+1 to goal.
-            // for (int i = 0; i < bCount; i++) {
-            //     path[fCount + i] = backwardPath[i];
-            // }
         }
     }
 
+    gridGroup.sync();
+
+    // found reconstruct path
+    // if(*found)
+    if(*found && blockIdx.x == 0 && (threadIdx.x == 0 || threadIdx.x == 1))
+        constractBidirectionalPath(startNodeId, targetNodeId, globalBestNode, path, pathLength, nodes);
+    // end of kernel
 }

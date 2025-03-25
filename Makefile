@@ -15,7 +15,7 @@ NVCC          := nvcc
 HOST_COMPILER := cl # Adjust if needed (e.g. full path)
 
 # Common NVCC flags (adjust as necessary)
-NVCC_FLAGS    := -I $(INC_DIR) -ccbin="$(HOST_COMPILER)" -arch=sm_75
+NVCC_FLAGS    := -I $(INC_DIR) -ccbin="$(HOST_COMPILER)" -arch=native
 
 # Default rule: build release target
 all: $(BIN_DIR)/$(TARGET)

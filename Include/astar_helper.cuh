@@ -63,6 +63,86 @@ __device__ __host__ int heuristic(int currentNodeId, int goalNodeId, int width) 
     return sqrtf((float)(dx * dx + dy * dy)) * SCALE_FACTOR;
 }
 
+
+// This function reconstructs a bidirectional path.
+// Two threads call this function: threadIdx.x==0 for the forward pass,
+// threadIdx.x==1 for the backward pass.
+
+
+__device__ void constractBidirectionalPath(int startNodeId, int endNodeId, BiNode& meetingNode, int* path, int* pathLength, BiNode* g_nodes) {
+
+    // Use a couple of shared integers to communicate chain lengths.
+    __shared__ volatile int backwardCount; // number of nodes in backward chain (includes meeting & start)
+    __shared__ volatile int forwardCount;  // number of nodes in forward chain (excluding the meeting node)
+
+    int tid = blockDim.x*blockIdx.x + threadIdx.x;
+    // printf("tid: %d\n", tid);
+
+    // __syncthreads();
+    
+    // --- Backward Pass (thread 1) ---
+    if (tid == 1) {
+        backwardCount = -1;
+        int count = 0;
+        int nodeId = meetingNode.id;
+        // First pass: count backward chain length (from meeting node to startNodeId)
+        // (Assume each parent's pointer is a valid index in g_nodes.)
+        while (nodeId != -1) {
+            count++;
+            nodeId = g_nodes[nodeId].parent_backward;
+        }
+        backwardCount = count;
+        *pathLength += backwardCount;
+        
+        while(forwardCount == -1) { }  // wait for forwardCount to be set
+        
+        // Second pass: iterate again and write the chain in reverse order so that
+        // path[0] is the start node and path[backwardCount-1] is the meeting node.
+        count = 0;
+        nodeId = meetingNode.id;
+        while (nodeId != -1) {
+            path[backwardCount - count - 1] = nodeId;
+            nodeId = g_nodes[nodeId].parent_backward;
+            count++;
+        }
+    }
+    
+    // --- Forward Pass (thread 0) ---
+    else if (tid == 0) {
+        forwardCount = -1;
+        int count = 0;
+        int nodeId = meetingNode.id;
+        // First pass: count forward chain length, but do not count the meeting node
+        while (nodeId != -1) {
+            count++;
+            nodeId = g_nodes[nodeId].parent_forward;
+        }
+        forwardCount = count;
+        *pathLength += forwardCount;
+        
+        while(backwardCount == -1) { }  // wait for backwardCount to be set
+        
+        // Second pass: fill in the forward chain (skip meeting node to avoid duplication)
+        count = 0;
+        // start with the node after meeting node
+        nodeId = meetingNode.parent_forward;
+        while (nodeId != -1) {
+            path[backwardCount + count] = nodeId;
+            nodeId = g_nodes[nodeId].parent_forward;
+            count++;
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
 /////////////////////////////////////////////////////////////////////////////////
 // Naive single-thread prefix sum over [start..end], inclusive.
 /////////////////////////////////////////////////////////////////////////////////
