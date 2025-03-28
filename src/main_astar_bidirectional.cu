@@ -1,8 +1,3 @@
-#pragma once
-#include "grid_generation.hpp"
-#include "bidirectional_astar.cuh"
-#include "utils.hpp"
-
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -10,27 +5,12 @@
 #include <iostream>
 #include <cmath>
 
-#define CUDA_CHECK(call)                                                      \
-    {                                                                         \
-        cudaError_t err = call;                                               \
-        if (err != cudaSuccess) {                                             \
-            fprintf(stderr, "CUDA Error: %s (err_num=%d) at %s:%d\n",         \
-                    cudaGetErrorString(err), err, __FILE__, __LINE__);        \
-            exit(EXIT_FAILURE);                                               \
-        }                                                                     \
-    }
+#include "grid_generation.cuh"
+#include "bidirectional_astar.cuh"
+#include "utils.cuh"
+#include "astar_helper.cuh"
+#include "constants.cuh"
 
-#define CUDA_KERNEL_CHECK()                                                   \
-    {                                                                         \
-        cudaError_t err = cudaGetLastError();                                 \
-        if (err != cudaSuccess) {                                             \
-            fprintf(stderr, "CUDA Kernel Error: %s (err_num=%d) at %s:%d\n",    \
-                    cudaGetErrorString(err), err, __FILE__, __LINE__);        \
-            exit(EXIT_FAILURE);                                               \
-        }                                                                     \
-    }
-
-// Main function for bidirectional A* using the bidirectional kernel
 int main(int argc, char** argv) {
     // --- Grid initialization ---
     int width = 1001;  
@@ -163,7 +143,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMalloc((void**)&d_backward_lastNonEmptyMask, sizeof(int)));
 
     // --- Copy BIN_SIZE constant to device ---
-    float minFValue = height * 1414;
+    float minFValue = height * DIAGONAL_COST;
     // float BIN_SIZE = 3000; // chosen for testing
     // CUDA_CHECK(cudaMemcpyToSymbol(BIN_SIZE_DEVICE, &BIN_SIZE, sizeof(float)));
 
@@ -175,9 +155,9 @@ int main(int argc, char** argv) {
     h_startNode.f_forward = h_startNode.g_forward + h_startNode.h_forward;
     h_startNode.parent_forward = -1;
     // Set backward fields to a high value.
-    h_startNode.g_backward = INT_MAX;
+    h_startNode.g_backward = gridSize * DIAGONAL_COST;
     h_startNode.h_backward = 0;
-    h_startNode.f_backward = INT_MAX;
+    h_startNode.f_backward = gridSize * DIAGONAL_COST;
     h_startNode.parent_backward = -1;
     CUDA_CHECK(cudaMemcpy(&d_nodes[startNodeId], &h_startNode, sizeof(BiNode), cudaMemcpyHostToDevice));
 
@@ -212,9 +192,9 @@ int main(int argc, char** argv) {
     h_goalNode.f_backward = h_goalNode.g_backward + h_goalNode.h_backward;
     h_goalNode.parent_backward = -1;
     // Set forward fields to INF.
-    h_goalNode.g_forward = INT_MAX;
+    h_goalNode.g_forward = gridSize * DIAGONAL_COST;
     h_goalNode.h_forward = 0;
-    h_goalNode.f_forward = INT_MAX;
+    h_goalNode.f_forward = gridSize * DIAGONAL_COST;
     h_goalNode.parent_forward = -1;
     CUDA_CHECK(cudaMemcpy(&d_nodes[goalNodeId], &h_goalNode, sizeof(BiNode), cudaMemcpyHostToDevice));
 
@@ -252,21 +232,34 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMemset(d_expandedNodes, -1, gridSize * sizeof(int)));
 
     // --- Initialize global best cost for bidirectional search ---
-    int h_globalBestCost = INT_MAX; // an arbitrarily high value
-    CUDA_CHECK(cudaMemcpyToSymbol(globalBestCost, &h_globalBestCost, sizeof(int)));
+    // Initialize bidirectional state
+    BidirectionalState h_bidirectionalState;
+    h_bidirectionalState.d_done_forward = false;
+    h_bidirectionalState.d_done_backward = false;
+    h_bidirectionalState.globalBestCost = INT_MAX;
+    h_bidirectionalState.global_forward_bucketRangeStart = -1;
+    h_bidirectionalState.global_forward_bucketRangeEnd = -1;
+    h_bidirectionalState.global_forward_totalElementsInRange = 0;
+    h_bidirectionalState.global_backward_bucketRangeStart = -1;
+    h_bidirectionalState.global_backward_bucketRangeEnd = -1;
+    h_bidirectionalState.global_backward_totalElementsInRange = 0;
 
     // --- Initialize global best node for bidirectional search ---
-    BiNode h_globalBestNode;
-    h_globalBestNode.id = -1;
-    h_globalBestNode.g_forward = INT_MAX;
-    h_globalBestNode.h_forward = 0;
-    h_globalBestNode.f_forward = INT_MAX;
-    h_globalBestNode.parent_forward = -1;
-    h_globalBestNode.g_backward = INT_MAX;
-    h_globalBestNode.h_backward = 0;
-    h_globalBestNode.f_backward = INT_MAX;
-    h_globalBestNode.parent_backward = -1;
-    CUDA_CHECK(cudaMemcpyToSymbol(globalBestNode, &h_globalBestNode, sizeof(BiNode)));
+    h_bidirectionalState.globalBestNode.id = -1;
+    h_bidirectionalState.globalBestNode.g_forward = gridSize * DIAGONAL_COST;
+    h_bidirectionalState.globalBestNode.h_forward = 0;
+    h_bidirectionalState.globalBestNode.f_forward = gridSize * DIAGONAL_COST;
+    h_bidirectionalState.globalBestNode.parent_forward = -1;
+    h_bidirectionalState.globalBestNode.g_backward = gridSize * DIAGONAL_COST;
+    h_bidirectionalState.globalBestNode.h_backward = 0;
+    h_bidirectionalState.globalBestNode.f_backward = gridSize * DIAGONAL_COST;
+    h_bidirectionalState.globalBestNode.parent_backward = -1;
+
+    // allocate device memory for the bidirectional state
+    BidirectionalState *d_bidirectionalState;
+    CUDA_CHECK(cudaMalloc((void**)&d_bidirectionalState, sizeof(BidirectionalState)));
+    // copy the initial state to device
+    CUDA_CHECK(cudaMemcpy(d_bidirectionalState, &h_bidirectionalState, sizeof(BidirectionalState), cudaMemcpyHostToDevice));
 
     // --- Timing the bidirectional A* execution ---
     auto startTime = std::chrono::high_resolution_clock::now();
@@ -274,8 +267,8 @@ int main(int argc, char** argv) {
     // --- Set grid/block dimensions for kernel launch ---
     int frontierSize = 256;
     int threadsPerBlock = 256;
-    int totalThreadsKernel = frontierSize * 16;
-    // int totalThreadsKernel = 30000;
+    int totalThreadsKernel = frontierSize * 32; // we will usually only use frontierSize * 16, but we do this for an edge case
+    // int totalThreadsKernel = 20000;
     int numBlocks = (totalThreadsKernel + threadsPerBlock - 1) / threadsPerBlock;
     dim3 gridDim(numBlocks);
     dim3 blockDim(threadsPerBlock);
@@ -313,17 +306,20 @@ int main(int argc, char** argv) {
         (void *)&d_totalExpandedNodes,
         (void *)&d_expandedNodes,
         (void *)&d_forward_firstNonEmptyMask,
-        (void *)&d_forward_lastNonEmptyMask
+        (void *)&d_forward_lastNonEmptyMask,
+        (void *)&d_bidirectionalState
     };
 
     // --- Launch the forward and backward kernels concurrently ---
     CUDA_CHECK(cudaLaunchCooperativeKernel((void *)biAStarMultipleBucketsSingleKernel, gridDim, blockDim, kernelArgsForward, 0, forwardStream));
     CUDA_KERNEL_CHECK();
 
+
+    // CUDA_CHECK(cudaDeviceSynchronize()); // Wait for the forward kernel to finish before launching the backward kernel
     // Synchronize both streams
-    CUDA_CHECK(cudaStreamSynchronize(forwardStream));
+    // CUDA_CHECK(cudaStreamSynchronize(forwardStream));
     // CUDA_CHECK(cudaStreamSynchronize(backwardStream));
-    CUDA_CHECK(cudaStreamDestroy(forwardStream));
+    // CUDA_CHECK(cudaStreamDestroy(forwardStream));
     // CUDA_CHECK(cudaStreamDestroy(backwardStream));
 
     auto endTime = std::chrono::high_resolution_clock::now();
@@ -359,8 +355,8 @@ int main(int argc, char** argv) {
         std::cout << "Path found with length " << h_pathLength 
                   << " and total cost " << totalCost << std::endl;
 
-        std::cout << green << "Execution time (Bidirectional A* kernel): " 
-                  << elapsedSeconds.count() << " seconds" << reset << std::endl;
+        std::cout << GREEN << "Execution time (Bidirectional A* kernel): " 
+                  << elapsedSeconds.count() << " seconds" << RESET << std::endl;
 
         int h_totalExpandedNodes;
         cudaMemcpy(&h_totalExpandedNodes, d_totalExpandedNodes, sizeof(int), cudaMemcpyDeviceToHost);
@@ -372,16 +368,16 @@ int main(int argc, char** argv) {
         // writeArrayToFile(h_path, h_pathLength, "path.txt");
         // writeArrayToFile(h_expandedNodes, gridSize, "expanded_nodes.txt");
 
-        std::cout << blue << "Total number of expanded nodes: " << h_totalExpandedNodes << reset << std::endl;
+        std::cout << BLUE << "Total number of expanded nodes: " << h_totalExpandedNodes << RESET << std::endl;
     } else {
         std::cout << "Path not found." << std::endl;
-        std::cout << green << "Execution time (Bidirectional A* kernel): " 
-                  << elapsedSeconds.count() << " seconds" << reset << std::endl;
+        std::cout << GREEN << "Execution time (Bidirectional A* kernel): " 
+                  << elapsedSeconds.count() << " seconds" << RESET << std::endl;
 
         int h_totalExpandedNodes;
         cudaMemcpy(&h_totalExpandedNodes, d_totalExpandedNodes, sizeof(int), cudaMemcpyDeviceToHost);
 
-        std::cout << blue << "Total number of expanded nodes: " << h_totalExpandedNodes << reset << std::endl;
+        std::cout << BLUE << "Total number of expanded nodes: " << h_totalExpandedNodes << RESET << std::endl;
     }
 
     // --- Cleanup device memory ---
