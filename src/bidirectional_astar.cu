@@ -119,19 +119,19 @@ __global__ void biAStarMultipleBucketsSingleKernel(
 
             // active elements forward
 // #ifdef DEBUG
-//             if(threadIdx.x == 0)
-//             {
-//                 printf("Active elements forward: %d\n", totalElementsInRange);
-//                 printf("Bucket range forward: %d - %d\n", state->global_forward_bucketRangeStart, state->global_forward_bucketRangeEnd);
+            if(threadIdx.x == 0)
+            {
+                printf("Active elements forward: %d\n", totalElementsInRange);
+                printf("Bucket range forward: %d - %d\n\n", state->global_forward_bucketRangeStart, state->global_forward_bucketRangeEnd);
 
-//             }
-//             else
-//             {
-//                 printf("Active elements backward: %d\n", totalElementsInRange);
-//                 printf("Bucket range backward: %d - %d\n", state->global_backward_bucketRangeStart, state->global_backward_bucketRangeEnd);
-//             }
+            }
+            else
+            {
+                printf("Active elements backward: %d\n", totalElementsInRange);
+                printf("Bucket range backward: %d - %d\n\n", state->global_backward_bucketRangeStart, state->global_backward_bucketRangeEnd);
+            }
 
-//             // wait(100000);
+            wait(10000000);
 // #endif
         }
 
@@ -184,14 +184,16 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             int nodeIndex     = threadPosition / MAX_NEIGHBORS;  
             int neighborIndex = threadPosition % MAX_NEIGHBORS;  
 
-            expandedNodes[atomicAdd(totalExpandedNodes, 1)] = nodeIndex;
+            // expandedNodes[atomicAdd(totalExpandedNodes, 1)] = nodeIndex;
+
+            atomicAdd(totalExpandedNodes, 1);
             
             int currentNodeId = openListBinsPtr[assignedBucket * MAX_BIN_SIZE + nodeIndex];
             BiNode currentNode = nodes[currentNodeId];
 
             // Early pruning: skip if the current node’s f-value is not promising.
             int currentF = threadAssignment == FORWARD ? currentNode.f_forward : currentNode.f_backward;
-            if (state->globalBestCost!=INT_MAX || currentF < state->globalBestCost)
+            if (state->globalBestCost==INT_MAX || currentF < state->globalBestCost)
             {
                 // 8-direction neighbor offsets.
                 int neighborOffsets[8][2] = {
@@ -241,6 +243,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                                 if (neighborId == targetNodeId) {
                                     unsigned int candidateCost = nodes[neighborId].f_forward;
                                     int oldCost = atomicMin(&state->globalBestCost, candidateCost);
+                                    // *found = true;
                                 }
                                 else if (nodes[neighborId].g_backward < gridSize + 1) {
                                     unsigned int candidateCost = nodes[neighborId].g_forward + nodes[neighborId].g_backward;
@@ -250,6 +253,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                                 if (neighborId == startNodeId) {
                                     unsigned int candidateCost = nodes[neighborId].f_backward;
                                     int oldCost = atomicMin(&state->globalBestCost, candidateCost);
+                                    // *found = true;
                                 }
                                 else if (nodes[neighborId].g_forward < gridSize + 1) {
                                     unsigned int candidateCost = nodes[neighborId].g_forward + nodes[neighborId].g_backward;
@@ -370,7 +374,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         if (state->globalBestCost == INT_MAX) {
             *found = false;
             *pathLength = 0;
-            printf("Path not found\n");
+            // printf("Path not found\n");
         } else {
             *found = true;
             printf("Path found\n");

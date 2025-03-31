@@ -266,9 +266,9 @@ int main(int argc, char** argv) {
 
     // --- Set grid/block dimensions for kernel launch ---
     int frontierSize = 256;
-    int threadsPerBlock = 256;
-    int totalThreadsKernel = frontierSize * 32; // we will usually only use frontierSize * 16, but we do this for an edge case
-    // int totalThreadsKernel = 20000;
+    int threadsPerBlock = 512;
+    // int totalThreadsKernel = frontierSize * 32; // we will usually only use frontierSize * 16, but we do this for an edge case
+    int totalThreadsKernel = 50000;
     int numBlocks = (totalThreadsKernel + threadsPerBlock - 1) / threadsPerBlock;
     dim3 gridDim(numBlocks);
     dim3 blockDim(threadsPerBlock);
@@ -317,9 +317,9 @@ int main(int argc, char** argv) {
 
     // CUDA_CHECK(cudaDeviceSynchronize()); // Wait for the forward kernel to finish before launching the backward kernel
     // Synchronize both streams
-    // CUDA_CHECK(cudaStreamSynchronize(forwardStream));
+    CUDA_CHECK(cudaStreamSynchronize(forwardStream));
     // CUDA_CHECK(cudaStreamSynchronize(backwardStream));
-    // CUDA_CHECK(cudaStreamDestroy(forwardStream));
+    CUDA_CHECK(cudaStreamDestroy(forwardStream));
     // CUDA_CHECK(cudaStreamDestroy(backwardStream));
 
     auto endTime = std::chrono::high_resolution_clock::now();
