@@ -155,9 +155,9 @@ int main(int argc, char** argv) {
     h_startNode.f_forward = h_startNode.g_forward + h_startNode.h_forward;
     h_startNode.parent_forward = -1;
     // Set backward fields to a high value.
-    h_startNode.g_backward = gridSize * DIAGONAL_COST;
+    h_startNode.g_backward = INT_MAX;
     h_startNode.h_backward = 0;
-    h_startNode.f_backward = gridSize * DIAGONAL_COST;
+    h_startNode.f_backward = INT_MAX;
     h_startNode.parent_backward = -1;
     CUDA_CHECK(cudaMemcpy(&d_nodes[startNodeId], &h_startNode, sizeof(BiNode), cudaMemcpyHostToDevice));
 
@@ -192,9 +192,9 @@ int main(int argc, char** argv) {
     h_goalNode.f_backward = h_goalNode.g_backward + h_goalNode.h_backward;
     h_goalNode.parent_backward = -1;
     // Set forward fields to INF.
-    h_goalNode.g_forward = gridSize * DIAGONAL_COST;
+    h_goalNode.g_forward = INT_MAX;
     h_goalNode.h_forward = 0;
-    h_goalNode.f_forward = gridSize * DIAGONAL_COST;
+    h_goalNode.f_forward = INT_MAX;
     h_goalNode.parent_forward = -1;
     CUDA_CHECK(cudaMemcpy(&d_nodes[goalNodeId], &h_goalNode, sizeof(BiNode), cudaMemcpyHostToDevice));
 
@@ -246,13 +246,13 @@ int main(int argc, char** argv) {
 
     // --- Initialize global best node for bidirectional search ---
     h_bidirectionalState.globalBestNode.id = -1;
-    h_bidirectionalState.globalBestNode.g_forward = gridSize * DIAGONAL_COST;
+    h_bidirectionalState.globalBestNode.g_forward = INT_MAX;
     h_bidirectionalState.globalBestNode.h_forward = 0;
-    h_bidirectionalState.globalBestNode.f_forward = gridSize * DIAGONAL_COST;
+    h_bidirectionalState.globalBestNode.f_forward = INT_MAX;
     h_bidirectionalState.globalBestNode.parent_forward = -1;
-    h_bidirectionalState.globalBestNode.g_backward = gridSize * DIAGONAL_COST;
+    h_bidirectionalState.globalBestNode.g_backward = INT_MAX;
     h_bidirectionalState.globalBestNode.h_backward = 0;
-    h_bidirectionalState.globalBestNode.f_backward = gridSize * DIAGONAL_COST;
+    h_bidirectionalState.globalBestNode.f_backward = INT_MAX;
     h_bidirectionalState.globalBestNode.parent_backward = -1;
 
     // allocate device memory for the bidirectional state
@@ -265,10 +265,10 @@ int main(int argc, char** argv) {
     auto startTime = std::chrono::high_resolution_clock::now();
 
     // --- Set grid/block dimensions for kernel launch ---
-    int frontierSize = 256;
+    int frontierSize = 512;
     int threadsPerBlock = 512;
     // int totalThreadsKernel = frontierSize * 32; // we will usually only use frontierSize * 16, but we do this for an edge case
-    int totalThreadsKernel = 50000;
+    int totalThreadsKernel = 30000;
     int numBlocks = (totalThreadsKernel + threadsPerBlock - 1) / threadsPerBlock;
     dim3 gridDim(numBlocks);
     dim3 blockDim(threadsPerBlock);
@@ -357,6 +357,8 @@ int main(int argc, char** argv) {
 
         std::cout << GREEN << "Execution time (Bidirectional A* kernel): " 
                   << elapsedSeconds.count() << " seconds" << RESET << std::endl;
+
+        visualizeAStarPathOnGrid(h_grid, width, height, h_path, h_pathLength, "./data/AstarPath.png");
 
         int h_totalExpandedNodes;
         cudaMemcpy(&h_totalExpandedNodes, d_totalExpandedNodes, sizeof(int), cudaMemcpyDeviceToHost);

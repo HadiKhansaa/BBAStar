@@ -1,4 +1,10 @@
 #include "grid_generation.cuh"
+#include "constants.cuh"
+#include <algorithm>
+
+// Include stb_image_write for PNG output
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 // Function to save the grid to a compressed file
 void saveCompressedGridToFile(const int *grid, int width, int height, const std::string &filename) {
@@ -71,25 +77,26 @@ void applyRandomObstacles(int *grid, int width, int height, float obstacleRate) 
 
     // Initialize all cells to free
     for (int i = 0; i < width * height; i++) {
-        grid[i] = 0; // 0 indicates free cell
+        grid[i] = PASSABLE; // 0 indicates free cell
     }
 
     // Place random obstacles
     for (int i = 0; i < width * height; i++) {
         float randValue = static_cast<float>(rand()) / RAND_MAX;
         if (randValue < obstacleRate) {
-            grid[i] = 1; // 1 indicates an obstacle
+            grid[i] = OBSTACLE; // 1 indicates an obstacle
         }
     }
 
     for(int i=0; i<width; ++i) // clear top row
-        grid[i] = 0;
+        grid[i] = PASSABLE;
 
     for(int i = 0; i<height; ++i) // clear right column
-        grid[height * i + width - 1] = 0;
+        grid[width * i + width - 1] = PASSABLE;
 
     // Ensure the goal cell is free
-    grid[(height - 1) * width + (width - 1)] = 0;
+    grid[0] = PASSABLE; // Starting cell
+    grid[(height - 1) * width + (width - 1)] = PASSABLE; // Goal cell
 }
 
 // Helper function to convert 2D index to 1D index
@@ -107,12 +114,12 @@ void divide(int* grid, int startX, int startY, int width, int height, bool horiz
         // Create a horizontal wall
         int wallY = startY + rand() % (height - 2) + 1;
         for (int x = startX; x < startX + width; ++x) {
-            grid[index(x, wallY, n)] = 1;
+            grid[index(x, wallY, n)] = OBSTACLE;
         }
 
         // Create a passage in the wall
         int passageX = startX + rand() % width;
-        grid[index(passageX, wallY, n)] = 0;
+        grid[index(passageX, wallY, n)] = PASSABLE;
 
         // Recursively divide the top and bottom areas
         divide(grid, startX, startY, width, wallY - startY, !horizontal, n);  // Top half
@@ -121,12 +128,12 @@ void divide(int* grid, int startX, int startY, int width, int height, bool horiz
         // Create a vertical wall
         int wallX = startX + rand() % (width - 2) + 1;
         for (int y = startY; y < startY + height; ++y) {
-            grid[index(wallX, y, n)] = 1;
+            grid[index(wallX, y, n)] = OBSTACLE;
         }
 
         // Create a passage in the wall
         int passageY = startY + rand() % height;
-        grid[index(wallX, passageY, n)] = 0;
+        grid[index(wallX, passageY, n)] = PASSABLE;
 
         // Recursively divide the left and right areas
         divide(grid, startX, startY, wallX - startX, height, !horizontal, n);  // Left half
@@ -141,7 +148,7 @@ void createMaze(int* grid, int n) {
     
     // Initialize the grid with all 1s (open cells)
     for (int i = 0; i < n * n; ++i) {
-        grid[i] = 0;
+        grid[i] = PASSABLE; // 0 indicates free cell
     }
 
     // Start recursive division with full grid
@@ -188,23 +195,23 @@ void createConcentratedObstacles(int* grid, int n) {
 
             // Use the probability to decide if the cell should be an obstacle (0) or open (1)
             if (static_cast<double>(rand()) / RAND_MAX < probability) {
-                grid[index(x, y, n)] = 1;  // Blocked cell (obstacle)
+                grid[index(x, y, n)] = OBSTACLE;  // Blocked cell (obstacle)
             } else {
-                grid[index(x, y, n)] = 0;  // Open cell
+                grid[index(x, y, n)] = PASSABLE;  // Open cell
             }
         }
     }
 
 
     for(int i=0; i<n; ++i) // clear top row
-        grid[i] = 0;
+        grid[i] = PASSABLE;
 
     for(int i = 0; i<n; ++i) // clear right column
-        grid[n * i + n - 1] = 0;
+        grid[n * i + n - 1] = PASSABLE;
     
 
-    grid[0] = 0;
-    grid[(n - 1) * n + (n - 1)] = 0;
+    grid[0] = PASSABLE;
+    grid[(n - 1) * n + (n - 1)] = PASSABLE; // Goal cell
 
 }
 
@@ -215,7 +222,7 @@ void applyRandomRectangleObstacles(int *grid, int width, int height, float recta
 
     // Initialize all cells to free
     for (int i = 0; i < width * height; i++) {
-        grid[i] = 0; // 0 indicates free cell
+        grid[i] = PASSABLE; // 0 indicates free cell
     }
 
     // Place random rectangle-shaped obstacles
@@ -231,27 +238,27 @@ void applyRandomRectangleObstacles(int *grid, int width, int height, float recta
         // Place the rectangle on the grid, ensuring it doesn't go out of bounds
         for (int i = startY; i < startY + rectHeight && i < height; i++) {
             for (int j = startX; j < startX + rectWidth && j < width; j++) {
-                grid[i * width + j] = 1; // 1 indicates an obstacle
+                grid[i * width + j] = OBSTACLE; // 1 indicates an obstacle
             }
         }
     }
 
-    for(int i=0; i<height; ++i) // clear top row
-        grid[i] = 0;
+    for(int i=0; i<width; ++i) // clear top row
+        grid[i] = PASSABLE;
 
     for(int i = 0; i<height; ++i) // clear right column
-        grid[height * i + height - 1] = 0;
+        grid[width * i + width - 1] = PASSABLE;
 
     // Ensure the starting and goal cells are free
     grid[0] = 0; // Starting cell
-    grid[(height - 1) * width + (width - 1)] = 0; // Goal cell
+    grid[(height - 1) * width + (width - 1)] = PASSABLE; // Goal cell
 }
 
 // Function to create a zigzag pattern in the grid
 void createZigzagPattern(int *grid, int width, int height) {
     // Clear the grid
     for (int i = 0; i < width * height; i++) {
-        grid[i] = 0;  // 0 indicates free cell
+        grid[i] = PASSABLE;  // 0 indicates free cell
     }
 
     // Create the zigzag pattern
@@ -260,12 +267,12 @@ void createZigzagPattern(int *grid, int width, int height) {
         if (row % 4 == 1) {
             // Block cells except the last column
             for (int col = 0; col < width - 1; col++) {
-                grid[row * width + col] = 1;  // 1 indicates blocked cell
+                grid[row * width + col] = OBSTACLE;  // 1 indicates blocked cell
             }
         } else if (row % 4 == 3) {
             // Block cells except the first column
             for (int col = 1; col < width; col++) {
-                grid[row * width + col] = 1;  // 1 indicates blocked cell
+                grid[row * width + col] = OBSTACLE;  // 1 indicates blocked cell
             }
         }
         row++;
@@ -321,6 +328,94 @@ void generatePPMImage(const int *grid, int width, int height, const int *path, i
 
     ofs.close();
     std::cout << "Image saved to " << filename << std::endl;
+}
+
+// New function: visualizeAStarPathOnGrid
+void visualizeAStarPathOnGrid(const int *grid, int width, int height,
+                              const int *path, const int pathLength,
+                              const std::string &filename) {
+    // Create a flag array for path cells (red)
+    std::vector<bool> isInPath(width * height, false);
+    for (int i = 0; i < pathLength; ++i) {
+        int nodeId = path[i];
+        if (nodeId >= 0 && nodeId < width * height) {
+            isInPath[nodeId] = true;
+        }
+    }
+
+    // Desired output dimensions are 1000x1000 if the grid is large enough.
+    int outWidth = (width >= 1000) ? 1000 : width;
+    int outHeight = (height >= 1000) ? 1000 : height;
+
+    // Determine the block size for grouping pixels.
+    // If the grid is smaller than 1000, we use a block size of 1.
+    int blockWidth = (width >= 1000) ? (width / outWidth) : 1;
+    int blockHeight = (height >= 1000) ? (height / outHeight) : 1;
+
+    // Allocate buffer for the output image (RGB for each pixel)
+    std::vector<unsigned char> image(outWidth * outHeight * 3, 255);
+
+    // Process each block that maps to one output pixel.
+    for (int by = 0; by < outHeight; ++by) {
+        for (int bx = 0; bx < outWidth; ++bx) {
+            bool redFound = false;
+            long sumR = 0, sumG = 0, sumB = 0;
+            int count = 0;
+
+            // Compute the boundaries for the current block (make sure not to go out-of-bounds)
+            int yStart = by * blockHeight;
+            int xStart = bx * blockWidth;
+            int yEnd = std::min((by + 1) * blockHeight, height);
+            int xEnd = std::min((bx + 1) * blockWidth, width);
+
+            for (int y = yStart; y < yEnd; ++y) {
+                for (int x = xStart; x < xEnd; ++x) {
+                    int idx = y * width + x;
+                    unsigned char r, g, b;
+                    // Determine the color of this cell.
+                    if (isInPath[idx]) {
+                        // Path cell: red
+                        r = 255; g = 0; b = 0;
+                        redFound = true;
+                    } else if (grid[idx] == 1) {
+                        // Obstacle: black
+                        r = g = b = 0;
+                    } else {
+                        // Free cell: white
+                        r = g = b = 255;
+                    }
+                    sumR += r;
+                    sumG += g;
+                    sumB += b;
+                    ++count;
+                }
+            }
+
+            // If any pixel in the block is red, set the output pixel to red.
+            unsigned char outR, outG, outB;
+            if (redFound) {
+                outR = 255;
+                outG = 0;
+                outB = 0;
+            } else {
+                outR = static_cast<unsigned char>(sumR / count);
+                outG = static_cast<unsigned char>(sumG / count);
+                outB = static_cast<unsigned char>(sumB / count);
+            }
+
+            int outIdx = (by * outWidth + bx) * 3;
+            image[outIdx]     = outR;
+            image[outIdx + 1] = outG;
+            image[outIdx + 2] = outB;
+        }
+    }
+
+    // Write out the PNG image using stb_image_write
+    if (stbi_write_png(filename.c_str(), outWidth, outHeight, 3, image.data(), outWidth * 3)) {
+        std::cout << "Image saved to " << filename << std::endl;
+    } else {
+        std::cerr << "Failed to save image to " << filename << std::endl;
+    }
 }
 
 // int main(int argc, char** argv)

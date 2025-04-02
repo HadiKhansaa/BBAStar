@@ -6,13 +6,13 @@ __global__ void initializeBiNodes(BiNode* nodes, int width, int height) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < width * height) {
         nodes[idx].id = idx;
-        nodes[idx].g_forward = INT_MAX;
+        nodes[idx].g_forward = INT_MAX; // set to max value
         nodes[idx].h_forward = 0;
-        nodes[idx].f_forward = INT_MAX;
+        nodes[idx].f_forward = INT_MAX; // set to max value
         nodes[idx].parent_forward = -1;
-        nodes[idx].g_backward = INT_MAX;
+        nodes[idx].g_backward = INT_MAX; // set to max value
         nodes[idx].h_backward = 0;
-        nodes[idx].f_backward = INT_MAX;
+        nodes[idx].f_backward = INT_MAX; // set to max value
         nodes[idx].parent_backward = -1;
     }
 }
@@ -43,7 +43,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     int *openListBinsPtr; // to be determined for each thread
     int *expansionBuffersPtr; // to be determined for each thread
     int *expansionCountsPtr; // to be determined for each thread
-    int gridSize = width * height; // total number of nodes in the grid
+    // int gridSize = width * height; // total number of nodes in the grid
 
     // Cooperative groups for grid-wide synchronization.
     cg::grid_group gridGroup = cg::this_grid();
@@ -55,6 +55,13 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     // Main bidirectional A* loop.
     while (!state->d_done_forward || !state->d_done_backward)
     {
+        // STOP CONDITION: if one uni-directional search is done and found the best path, break end the loop.
+        if(state->d_done_forward && state->globalBestCost != INT_MAX)
+            break;
+        if(state->d_done_backward && state->globalBestCost != INT_MAX)
+            break;
+
+
         // printf("forward: %d\n", forward);
         // Thread 0 of block 0 computes the active bucket range forward.
         // Thread 1 of block 0 computes the active bucket range backward.
@@ -94,13 +101,17 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             // edge case: first bucket is > frontierSize
             if (bucketRangeStart == bucketRangeEnd && totalElementsInRange == 0 &&
                 bucketRangeStart + 1 < MAX_BINS && binCountsPtr[bucketRangeStart + 1] > 0)
+            {
+                bucketRangeStart = bucketRangeStart + 1;
+                bucketRangeEnd = bucketRangeStart + 1;
                 totalElementsInRange = binCountsPtr[bucketRangeStart + 1];
+            }
             
             // 2 flags for forward pass and backward pass
-            else if(totalElementsInRange == 0 && threadIdx.x == 0)
+            if(totalElementsInRange == 0 && threadIdx.x == 0)
                 state->d_done_forward = true;
             
-            else if(totalElementsInRange == 0 && threadIdx.x == 1)
+            if(totalElementsInRange == 0 && threadIdx.x == 1)
                 state->d_done_backward = true;
             
             // broadcast to all other blocks
@@ -110,14 +121,14 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                 state->global_forward_bucketRangeEnd = bucketRangeEnd;
                 state->global_forward_totalElementsInRange = totalElementsInRange;
             }
-            else if (threadIdx.x == 1 && totalElementsInRange > 0)
+            if (threadIdx.x == 1 && totalElementsInRange > 0)
             {
                 state->global_backward_bucketRangeStart = bucketRangeStart;
                 state->global_backward_bucketRangeEnd = bucketRangeEnd;
                 state->global_backward_totalElementsInRange = totalElementsInRange;
             }
 
-            // active elements forward
+            // debugging
 // #ifdef DEBUG
             if(threadIdx.x == 0)
             {
@@ -125,7 +136,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                 printf("Bucket range forward: %d - %d\n\n", state->global_forward_bucketRangeStart, state->global_forward_bucketRangeEnd);
 
             }
-            else
+            if(threadIdx.x == 1)
             {
                 printf("Active elements backward: %d\n", totalElementsInRange);
                 printf("Bucket range backward: %d - %d\n\n", state->global_backward_bucketRangeStart, state->global_backward_bucketRangeEnd);
@@ -145,7 +156,8 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             threadAssignment = FORWARD;
         // second 8 * totalElementsInRange threads are responsible for backward search
         else if (idx >= state->global_forward_totalElementsInRange * MAX_NEIGHBORS
-        && idx < state->global_forward_totalElementsInRange * MAX_NEIGHBORS + state->global_backward_totalElementsInRange * MAX_NEIGHBORS)
+        && idx < state->global_forward_totalElementsInRange * MAX_NEIGHBORS +
+        state->global_backward_totalElementsInRange * MAX_NEIGHBORS)
             threadAssignment = BACKWARD;
 
         // decide thread <-> direction
@@ -210,7 +222,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
 
                 if (xNeighbor >= 0 && xNeighbor < width && yNeighbor >= 0 && yNeighbor < height) {
                     int neighborId = yNeighbor * width + xNeighbor;
-                    if (grid[neighborId] == 0) {  // if passable
+                    if (grid[neighborId] == PASSABLE) {  // if passable
                         bool isDiagonal = (abs(dx) + abs(dy) == 2);
                         int moveCost = isDiagonal ? DIAGONAL_COST : SCALE_FACTOR;
                         int tentativeG = (threadAssignment == FORWARD ? currentNode.g_forward : currentNode.g_backward) + moveCost;
@@ -240,25 +252,32 @@ __global__ void biAStarMultipleBucketsSingleKernel(
 
                             // Check if this neighbor has already been reached from the opposite search.
                             if (threadAssignment == FORWARD) {
-                                if (neighborId == targetNodeId) {
-                                    unsigned int candidateCost = nodes[neighborId].f_forward;
-                                    int oldCost = atomicMin(&state->globalBestCost, candidateCost);
-                                    // *found = true;
-                                }
-                                else if (nodes[neighborId].g_backward < gridSize + 1) {
+                                // if (neighborId == targetNodeId) {
+                                //     unsigned int candidateCost = nodes[neighborId].f_forward;
+                                //     int oldCost = atomicMin(&state->globalBestCost, candidateCost);
+                                //     state->globalBestNode = nodes[neighborId]; // needs changing
+                                //     // *found = true;
+                                //     printf("forward reached the end\n");
+
+                                // }
+                                // else {
                                     unsigned int candidateCost = nodes[neighborId].g_forward + nodes[neighborId].g_backward;
                                     int oldCost = atomicMin(&state->globalBestCost, candidateCost);
-                                }
+                                    state->globalBestNode = nodes[neighborId]; // needs changing
+                                // }
                             } else {
-                                if (neighborId == startNodeId) {
-                                    unsigned int candidateCost = nodes[neighborId].f_backward;
-                                    int oldCost = atomicMin(&state->globalBestCost, candidateCost);
-                                    // *found = true;
-                                }
-                                else if (nodes[neighborId].g_forward < gridSize + 1) {
+                                // if (neighborId == startNodeId) {
+                                //     unsigned int candidateCost = nodes[neighborId].f_backward;
+                                //     int oldCost = atomicMin(&state->globalBestCost, candidateCost);
+                                //     state->globalBestNode = nodes[neighborId]; // needs changing
+                                //     // *found = true;
+                                //     printf("backwards reached the start\n");
+                                // }
+                                // else {
                                     unsigned int candidateCost = nodes[neighborId].g_forward + nodes[neighborId].g_backward;
                                     int oldCost = atomicMin(&state->globalBestCost, candidateCost);
-                                } 
+                                    state->globalBestNode = nodes[neighborId]; // needs changing
+                                // } 
                             }
 
                             // EXPAND
@@ -384,8 +403,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     }
 
     // found reconstruct path
-    // if(*found)
-    // if(*found && blockIdx.x == 0 && (threadIdx.x == 0 || threadIdx.x == 1))
-    //     constractBidirectionalPath(startNodeId, targetNodeId, globalBestNode, path, pathLength, nodes);
+    if(*found && blockIdx.x == 0 && (threadIdx.x == 0 || threadIdx.x == 1))
+        constractBidirectionalPath(startNodeId, targetNodeId, state->globalBestNode, path, pathLength, nodes);
     // end of kernel
 }

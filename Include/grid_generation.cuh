@@ -24,3 +24,7 @@ void applyRandomObstacles(int *grid, int width, int height, float obstacleRate);
 void createConcentratedObstacles(int *grid, int height);
 
 void generatePPMImage(const int *grid, int width, int height, const int *path, int pathLength, const std::string &filename);
+
+void visualizeAStarPathOnGrid(const int *grid, int width, int height,
+    const int *path, const int pathLength,
+    const std::string &filename);

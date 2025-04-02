@@ -8,14 +8,16 @@
 #define SCALE_FACTOR 1000     // Scale factor for cost
 #define DIAGONAL_COST 1414      // Cost for diagonal movement (sqrt(2) * SCALE_FACTOR)
 
+// #define FRONTIER_SIZE 512
+#define MAX_PATH_LENGTH 10000000
+
+#define PASSABLE 0
+#define OBSTACLE 1
+
 // #define SH_MAX_RANGE 15
 // #define MAX_SHARED_BIN_SIZE 100
 // #define TILE_WIDTH  16
 // #define TILE_HEIGHT 16
-
-#define FRONTIER_SIZE 500
-#define MAX_PATH_LENGTH 10000000
-
 
 // Global variables for inter-block communication
 // extern __device__ bool d_done_forward = false;

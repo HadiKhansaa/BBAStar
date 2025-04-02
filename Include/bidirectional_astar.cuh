@@ -24,7 +24,6 @@ enum ThreadAssignment {
 
 // Global stucture for inter-block communication
 struct BidirectionalState {
-    // Global variables for inter-block communication
     bool d_done_forward = false;
     bool d_done_backward = false;
 
@@ -55,4 +54,5 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     int *backward_expansionBuffers, int *backward_expansionCounts,
     bool *found, int *path, int *pathLength,
     int binBitMaskSize, int frontierSize, 
-    int *totalExpandedNodes, int* expandedNodes, int* firstNonEmptyMask, int* lastNonEmptyMask, BidirectionalState* state);
+    int *totalExpandedNodes, int* expandedNodes, int* firstNonEmptyMask, int* lastNonEmptyMask,
+    BidirectionalState* state);
