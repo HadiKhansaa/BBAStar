@@ -25,7 +25,7 @@ all: $(BIN_DIR)/$(TARGET)
 # Release build rule
 $(BIN_DIR)/$(TARGET): $(CU_FILES) $(CPP_FILES)
 	mkdir $(BIN_DIR) 2>NUL || echo Bin directory already exists.
-	$(NVCC) $(NVCC_FLAGS) -O3 -o $@ $^
+	$(NVCC) $(NVCC_FLAGS) -O3 -g -lineinfo -o $@ $^
 
 # Debug build rule
 debug: $(BIN_DIR)/$(DEBUG_TARGET)

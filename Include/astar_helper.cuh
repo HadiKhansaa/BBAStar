@@ -23,6 +23,8 @@ struct BiNode {
     unsigned int f_backward;
     int parent_forward;
     int parent_backward;
+    int openListAddress_forward;
+    int openListAddress_backward;
 };
 
 __device__ inline void wait(int cycles) {
@@ -46,11 +48,20 @@ __host__ __device__ inline unsigned int heuristic(int currentNodeId, int goalNod
     int xGoal = goalNodeId % width;
     int yGoal = goalNodeId / width;
 
-    unsigned int dx = abs(xCurrent - xGoal);
-    unsigned int dy = abs(yCurrent - yGoal);
+    int dx = abs(xCurrent - xGoal);
+    int dy = abs(yCurrent - yGoal);
 
     // return (dx + dy) * SCALE_FACTOR;
-    return sqrtf((float)(dx * dx + dy * dy)) * SCALE_FACTOR;
+    // return (unsigned int) dx * SCALE_FACTOR;
+    return DIAGONAL_COST * min(dx, dy) + SCALE_FACTOR * abs(dx - dy);
+    // return SCALE_FACTOR * ((dx + dy) + (DIAGONAL_COST - 2 * SCALE_FACTOR) * min(dx, dy));
+    // return (unsigned int) sqrtf((float)(dx * dx + dy * dy)) * SCALE_FACTOR;
+}
+
+__host__ __device__ inline unsigned int binForNode(unsigned int fValue, int width) {
+    unsigned int minFValue = DIAGONAL_COST * (width-1);
+    unsigned int adjustedF =  fValue - minFValue; 
+    return (adjustedF / BUCKET_F_RANGE);
 }
 
 // This function reconstructs a bidirectional path.

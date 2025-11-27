@@ -26,5 +26,6 @@ void createConcentratedObstacles(int *grid, int height);
 void generatePPMImage(const int *grid, int width, int height, const int *path, int pathLength, const std::string &filename);
 
 void visualizeAStarPathOnGrid(const int *grid, int width, int height,
-    const int *path, const int pathLength,
-    const std::string &filename);
+                              const int *path, int pathLength,
+                              const int *expandedNodes, int expandedLength,
+                              const std::string &filename);

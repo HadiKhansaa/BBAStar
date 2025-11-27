@@ -66,6 +66,12 @@ int main(int argc, char** argv) {
     else
         applyRandomObstacles(h_grid, width, height, obstacleRate);
 
+    // if maze or zigzag set BUCKET_F_RANGE to 1000000
+    if (gridType == "maze" || gridType == "zigzag") {
+        #undef BUCKET_F_RANGE
+        #define BUCKET_F_RANGE 1000000
+    }
+
     // Ensure start and goal are free.
     h_grid[startNodeId] = 0;
     h_grid[goalNodeId] = 0;
@@ -105,32 +111,32 @@ int main(int argc, char** argv) {
 
     // --- Allocate open list bins and related arrays for forward search ---
     int *d_forward_openListBins, *d_forward_binCounts;
-    unsigned long long *d_forward_binBitMask;
+    uint64_t *d_forward_binBitMask;
     int *d_forward_expansionBuffers, *d_forward_expansionCounts;
     int binBitMaskSize = (MAX_BINS + 63) / 64;
     CUDA_CHECK(cudaMalloc((void **)&d_forward_openListBins, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void **)&d_forward_binCounts, MAX_BINS * sizeof(int)));
-    CUDA_CHECK(cudaMalloc((void **)&d_forward_binBitMask, binBitMaskSize * sizeof(unsigned long long)));
+    CUDA_CHECK(cudaMalloc((void **)&d_forward_binBitMask, binBitMaskSize * sizeof(uint64_t)));
     CUDA_CHECK(cudaMalloc((void **)&d_forward_expansionBuffers, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void **)&d_forward_expansionCounts, MAX_BINS * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_forward_openListBins, -1, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_forward_binCounts, 0, MAX_BINS * sizeof(int)));
-    CUDA_CHECK(cudaMemset(d_forward_binBitMask, 0, binBitMaskSize * sizeof(unsigned long long)));
+    CUDA_CHECK(cudaMemset(d_forward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_forward_expansionCounts, 0, MAX_BINS * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_forward_expansionBuffers, -1, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
 
     // --- Allocate open list bins for backward search ---
     int *d_backward_openListBins, *d_backward_binCounts;
-    unsigned long long *d_backward_binBitMask;
+    uint64_t *d_backward_binBitMask;
     int *d_backward_expansionBuffers, *d_backward_expansionCounts;
     CUDA_CHECK(cudaMalloc((void **)&d_backward_openListBins, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void **)&d_backward_binCounts, MAX_BINS * sizeof(int)));
-    CUDA_CHECK(cudaMalloc((void **)&d_backward_binBitMask, binBitMaskSize * sizeof(unsigned long long)));
+    CUDA_CHECK(cudaMalloc((void **)&d_backward_binBitMask, binBitMaskSize * sizeof(uint64_t)));
     CUDA_CHECK(cudaMalloc((void **)&d_backward_expansionBuffers, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void **)&d_backward_expansionCounts, MAX_BINS * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_backward_openListBins, -1, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_backward_binCounts, 0, MAX_BINS * sizeof(int)));
-    CUDA_CHECK(cudaMemset(d_backward_binBitMask, 0, binBitMaskSize * sizeof(unsigned long long)));
+    CUDA_CHECK(cudaMemset(d_backward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_backward_expansionCounts, 0, MAX_BINS * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_backward_expansionBuffers, -1, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
 
@@ -143,7 +149,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMalloc((void**)&d_backward_lastNonEmptyMask, sizeof(int)));
 
     // --- Copy BIN_SIZE constant to device ---
-    float minFValue = height * DIAGONAL_COST;
+    unsigned int minFValue = (height - 1) * DIAGONAL_COST;
     // float BIN_SIZE = 3000; // chosen for testing
     // CUDA_CHECK(cudaMemcpyToSymbol(BIN_SIZE_DEVICE, &BIN_SIZE, sizeof(float)));
 
@@ -159,6 +165,9 @@ int main(int argc, char** argv) {
     h_startNode.h_backward = 0;
     h_startNode.f_backward = INT_MAX;
     h_startNode.parent_backward = -1;
+    h_startNode.openListAddress_forward = -1;
+    h_startNode.openListAddress_backward = -1;
+    
     CUDA_CHECK(cudaMemcpy(&d_nodes[startNodeId], &h_startNode, sizeof(BiNode), cudaMemcpyHostToDevice));
 
     int startBin = (int)((h_startNode.f_forward - minFValue) / BUCKET_F_RANGE);
@@ -172,15 +181,15 @@ int main(int argc, char** argv) {
     h_forward_binCounts[startBin] = 1;
     h_forward_openListBins[startBin * MAX_BIN_SIZE] = startNodeId;
 
-    unsigned long long *h_forward_binBitMask = (unsigned long long*)malloc(binBitMaskSize * sizeof(unsigned long long));
-    memset(h_forward_binBitMask, 0, binBitMaskSize * sizeof(unsigned long long));
+    uint64_t *h_forward_binBitMask = (uint64_t*)malloc(binBitMaskSize * sizeof(uint64_t));
+    memset(h_forward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t));
     int forwardMaskIndex = startBin / 64;
-    unsigned long long forwardMask = 1ULL << (startBin % 64);
+    uint64_t forwardMask = 1ULL << (startBin % 64);
     h_forward_binBitMask[forwardMaskIndex] |= forwardMask;
 
     CUDA_CHECK(cudaMemcpy(d_forward_openListBins, h_forward_openListBins, MAX_BINS * MAX_BIN_SIZE * sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_forward_binCounts, h_forward_binCounts, MAX_BINS * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_forward_binBitMask, h_forward_binBitMask, binBitMaskSize * sizeof(unsigned long long), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_forward_binBitMask, h_forward_binBitMask, binBitMaskSize * sizeof(uint64_t), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_forward_firstNonEmptyMask, &forwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_forward_lastNonEmptyMask, &forwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
 
@@ -196,6 +205,9 @@ int main(int argc, char** argv) {
     h_goalNode.h_forward = 0;
     h_goalNode.f_forward = INT_MAX;
     h_goalNode.parent_forward = -1;
+    h_goalNode.openListAddress_forward = -1;
+    h_goalNode.openListAddress_backward = -1;
+
     CUDA_CHECK(cudaMemcpy(&d_nodes[goalNodeId], &h_goalNode, sizeof(BiNode), cudaMemcpyHostToDevice));
 
     int goalBin = (int)((h_goalNode.f_backward - minFValue) / BUCKET_F_RANGE);
@@ -209,15 +221,15 @@ int main(int argc, char** argv) {
     h_backward_binCounts[goalBin] = 1;
     h_backward_openListBins[goalBin * MAX_BIN_SIZE] = goalNodeId;
 
-    unsigned long long *h_backward_binBitMask = (unsigned long long*)malloc(binBitMaskSize * sizeof(unsigned long long));
-    memset(h_backward_binBitMask, 0, binBitMaskSize * sizeof(unsigned long long));
+    uint64_t *h_backward_binBitMask = (uint64_t*)malloc(binBitMaskSize * sizeof(uint64_t));
+    memset(h_backward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t));
     int backwardMaskIndex = goalBin / 64;
-    unsigned long long backwardMask = 1ULL << (goalBin % 64);
+    uint64_t backwardMask = 1ULL << (goalBin % 64);
     h_backward_binBitMask[backwardMaskIndex] |= backwardMask;
 
     CUDA_CHECK(cudaMemcpy(d_backward_openListBins, h_backward_openListBins, MAX_BINS * MAX_BIN_SIZE * sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_backward_binCounts, h_backward_binCounts, MAX_BINS * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_backward_binBitMask, h_backward_binBitMask, binBitMaskSize * sizeof(unsigned long long), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_backward_binBitMask, h_backward_binBitMask, binBitMaskSize * sizeof(uint64_t), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_backward_firstNonEmptyMask, &backwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_backward_lastNonEmptyMask, &backwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
 
@@ -265,10 +277,10 @@ int main(int argc, char** argv) {
     auto startTime = std::chrono::high_resolution_clock::now();
 
     // --- Set grid/block dimensions for kernel launch ---
-    int frontierSize = 512;
-    int threadsPerBlock = 512;
+    int frontierSize = 128;
+    int threadsPerBlock = 256;
     // int totalThreadsKernel = frontierSize * 32; // we will usually only use frontierSize * 16, but we do this for an edge case
-    int totalThreadsKernel = 30000;
+    int totalThreadsKernel = 40000;
     int numBlocks = (totalThreadsKernel + threadsPerBlock - 1) / threadsPerBlock;
     dim3 gridDim(numBlocks);
     dim3 blockDim(threadsPerBlock);
@@ -358,7 +370,7 @@ int main(int argc, char** argv) {
         std::cout << GREEN << "Execution time (Bidirectional A* kernel): " 
                   << elapsedSeconds.count() << " seconds" << RESET << std::endl;
 
-        visualizeAStarPathOnGrid(h_grid, width, height, h_path, h_pathLength, "./data/AstarPath.png");
+        // visualizeAStarPathOnGrid(h_grid, width, height, h_path, h_pathLength, "./data/AstarPath.png");
 
         int h_totalExpandedNodes;
         cudaMemcpy(&h_totalExpandedNodes, d_totalExpandedNodes, sizeof(int), cudaMemcpyDeviceToHost);
@@ -370,6 +382,8 @@ int main(int argc, char** argv) {
         // writeArrayToFile(h_path, h_pathLength, "path.txt");
         // writeArrayToFile(h_expandedNodes, gridSize, "expanded_nodes.txt");
 
+        visualizeAStarPathOnGrid(h_grid, width, height, h_path, h_pathLength, h_expandedNodes, h_totalExpandedNodes, "./data/AstarPath.png");
+        
         std::cout << BLUE << "Total number of expanded nodes: " << h_totalExpandedNodes << RESET << std::endl;
     } else {
         std::cout << "Path not found." << std::endl;
@@ -380,6 +394,8 @@ int main(int argc, char** argv) {
         cudaMemcpy(&h_totalExpandedNodes, d_totalExpandedNodes, sizeof(int), cudaMemcpyDeviceToHost);
 
         std::cout << BLUE << "Total number of expanded nodes: " << h_totalExpandedNodes << RESET << std::endl;
+
+        // visualizeAStarPathOnGrid(h_grid, width, height, h_path, h_pathLength, h_expandedNodes, h_totalExpandedNodes, "./data/AstarPath.png");
     }
 
     // --- Cleanup device memory ---

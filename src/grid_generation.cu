@@ -332,58 +332,77 @@ void generatePPMImage(const int *grid, int width, int height, const int *path, i
 
 // New function: visualizeAStarPathOnGrid
 void visualizeAStarPathOnGrid(const int *grid, int width, int height,
-                              const int *path, const int pathLength,
+                              const int *path, int pathLength,
+                              const int *expandedNodes, int expandedLength,
                               const std::string &filename) {
-    // Create a flag array for path cells (red)
+    // Flags for path cells (red) and expanded cells (orange)
     std::vector<bool> isInPath(width * height, false);
+    std::vector<bool> isExpanded(width * height, false);
+
+    // Mark path nodes
     for (int i = 0; i < pathLength; ++i) {
         int nodeId = path[i];
-        if (nodeId >= 0 && nodeId < width * height) {
+        if (0 <= nodeId && nodeId < width * height) {
             isInPath[nodeId] = true;
         }
     }
+    // Mark expanded nodes
+    for (int i = 0; i < expandedLength; ++i) {
+        int nodeId = expandedNodes[i];
+        if (0 <= nodeId && nodeId < width * height) {
+            isExpanded[nodeId] = true;
+        }
+    }
 
-    // Desired output dimensions are 1000x1000 if the grid is large enough.
-    int outWidth = (width >= 1000) ? 1000 : width;
-    int outHeight = (height >= 1000) ? 1000 : height;
+    // Determine output resolution (max 1000×1000)
+    int outWidth  = (width  > 1000 ? 1000 : width);
+    int outHeight = (height > 1000 ? 1000 : height);
 
-    // Determine the block size for grouping pixels.
-    // If the grid is smaller than 1000, we use a block size of 1.
-    int blockWidth = (width >= 1000) ? (width / outWidth) : 1;
-    int blockHeight = (height >= 1000) ? (height / outHeight) : 1;
+    // Compute how many grid cells map into one output pixel
+    int blockW = (width  > 1000 ? width  / outWidth  : 1);
+    int blockH = (height > 1000 ? height / outHeight : 1);
 
-    // Allocate buffer for the output image (RGB for each pixel)
+    // RGB buffer, default white
     std::vector<unsigned char> image(outWidth * outHeight * 3, 255);
 
-    // Process each block that maps to one output pixel.
     for (int by = 0; by < outHeight; ++by) {
         for (int bx = 0; bx < outWidth; ++bx) {
-            bool redFound = false;
+            bool redFound    = false;
+            bool orangeFound = false;
             long sumR = 0, sumG = 0, sumB = 0;
             int count = 0;
 
-            // Compute the boundaries for the current block (make sure not to go out-of-bounds)
-            int yStart = by * blockHeight;
-            int xStart = bx * blockWidth;
-            int yEnd = std::min((by + 1) * blockHeight, height);
-            int xEnd = std::min((bx + 1) * blockWidth, width);
+            // Block bounds in the original grid
+            int y0 = by * blockH;
+            int x0 = bx * blockW;
+            int y1 = std::min(y0 + blockH, height);
+            int x1 = std::min(x0 + blockW, width);
 
-            for (int y = yStart; y < yEnd; ++y) {
-                for (int x = xStart; x < xEnd; ++x) {
+            // Inspect each cell in this block
+            for (int y = y0; y < y1; ++y) {
+                for (int x = x0; x < x1; ++x) {
                     int idx = y * width + x;
                     unsigned char r, g, b;
-                    // Determine the color of this cell.
+
                     if (isInPath[idx]) {
-                        // Path cell: red
-                        r = 255; g = 0; b = 0;
+                        // Path → red
+                        r = 255; g =   0; b =   0;
                         redFound = true;
-                    } else if (grid[idx] == 1) {
-                        // Obstacle: black
+                    }
+                    else if (isExpanded[idx]) {
+                        // Expanded → orange
+                        r = 255; g = 165; b =   0;
+                        orangeFound = true;
+                    }
+                    else if (grid[idx] == 1) {
+                        // Obstacle → black
                         r = g = b = 0;
-                    } else {
-                        // Free cell: white
+                    }
+                    else {
+                        // Free → white
                         r = g = b = 255;
                     }
+
                     sumR += r;
                     sumG += g;
                     sumB += b;
@@ -391,30 +410,32 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
                 }
             }
 
-            // If any pixel in the block is red, set the output pixel to red.
             unsigned char outR, outG, outB;
             if (redFound) {
-                outR = 255;
-                outG = 0;
-                outB = 0;
-            } else {
+                outR = 255; outG =   0; outB =   0;
+            }
+            else if (orangeFound) {
+                outR = 255; outG = 165; outB =   0;
+            }
+            else {
+                // average the block
                 outR = static_cast<unsigned char>(sumR / count);
                 outG = static_cast<unsigned char>(sumG / count);
                 outB = static_cast<unsigned char>(sumB / count);
             }
 
             int outIdx = (by * outWidth + bx) * 3;
-            image[outIdx]     = outR;
+            image[outIdx    ] = outR;
             image[outIdx + 1] = outG;
             image[outIdx + 2] = outB;
         }
     }
 
-    // Write out the PNG image using stb_image_write
+    // Write PNG
     if (stbi_write_png(filename.c_str(), outWidth, outHeight, 3, image.data(), outWidth * 3)) {
-        std::cout << "Image saved to " << filename << std::endl;
+        std::cout << "Image saved to " << filename << "\n";
     } else {
-        std::cerr << "Failed to save image to " << filename << std::endl;
+        std::cerr << "Failed to save image to " << filename << "\n";
     }
 }
 
