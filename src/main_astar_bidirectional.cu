@@ -111,32 +111,32 @@ int main(int argc, char** argv) {
 
     // --- Allocate open list bins and related arrays for forward search ---
     int *d_forward_openListBins, *d_forward_binCounts;
-    uint64_t *d_forward_binBitMask;
+    // uint64_t *d_forward_binBitMask;
     int *d_forward_expansionBuffers, *d_forward_expansionCounts;
-    int binBitMaskSize = (MAX_BINS + 63) / 64;
+    // int binBitMaskSize = (MAX_BINS + 63) / 64;
     CUDA_CHECK(cudaMalloc((void **)&d_forward_openListBins, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void **)&d_forward_binCounts, MAX_BINS * sizeof(int)));
-    CUDA_CHECK(cudaMalloc((void **)&d_forward_binBitMask, binBitMaskSize * sizeof(uint64_t)));
+    // CUDA_CHECK(cudaMalloc((void **)&d_forward_binBitMask, binBitMaskSize * sizeof(uint64_t)));
     CUDA_CHECK(cudaMalloc((void **)&d_forward_expansionBuffers, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void **)&d_forward_expansionCounts, MAX_BINS * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_forward_openListBins, -1, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_forward_binCounts, 0, MAX_BINS * sizeof(int)));
-    CUDA_CHECK(cudaMemset(d_forward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t)));
+    // CUDA_CHECK(cudaMemset(d_forward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_forward_expansionCounts, 0, MAX_BINS * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_forward_expansionBuffers, -1, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
 
     // --- Allocate open list bins for backward search ---
     int *d_backward_openListBins, *d_backward_binCounts;
-    uint64_t *d_backward_binBitMask;
+    // uint64_t *d_backward_binBitMask;
     int *d_backward_expansionBuffers, *d_backward_expansionCounts;
     CUDA_CHECK(cudaMalloc((void **)&d_backward_openListBins, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void **)&d_backward_binCounts, MAX_BINS * sizeof(int)));
-    CUDA_CHECK(cudaMalloc((void **)&d_backward_binBitMask, binBitMaskSize * sizeof(uint64_t)));
+    // CUDA_CHECK(cudaMalloc((void **)&d_backward_binBitMask, binBitMaskSize * sizeof(uint64_t)));
     CUDA_CHECK(cudaMalloc((void **)&d_backward_expansionBuffers, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void **)&d_backward_expansionCounts, MAX_BINS * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_backward_openListBins, -1, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_backward_binCounts, 0, MAX_BINS * sizeof(int)));
-    CUDA_CHECK(cudaMemset(d_backward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t)));
+    // CUDA_CHECK(cudaMemset(d_backward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_backward_expansionCounts, 0, MAX_BINS * sizeof(int)));
     CUDA_CHECK(cudaMemset(d_backward_expansionBuffers, -1, MAX_BINS * MAX_BIN_SIZE * sizeof(int)));
 
@@ -181,17 +181,17 @@ int main(int argc, char** argv) {
     h_forward_binCounts[startBin] = 1;
     h_forward_openListBins[startBin * MAX_BIN_SIZE] = startNodeId;
 
-    uint64_t *h_forward_binBitMask = (uint64_t*)malloc(binBitMaskSize * sizeof(uint64_t));
-    memset(h_forward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t));
-    int forwardMaskIndex = startBin / 64;
-    uint64_t forwardMask = 1ULL << (startBin % 64);
-    h_forward_binBitMask[forwardMaskIndex] |= forwardMask;
+    // uint64_t *h_forward_binBitMask = (uint64_t*)malloc(binBitMaskSize * sizeof(uint64_t));
+    // memset(h_forward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t));
+    // int forwardMaskIndex = startBin / 64;
+    // uint64_t forwardMask = 1ULL << (startBin % 64);
+    // h_forward_binBitMask[forwardMaskIndex] |= forwardMask;
 
     CUDA_CHECK(cudaMemcpy(d_forward_openListBins, h_forward_openListBins, MAX_BINS * MAX_BIN_SIZE * sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_forward_binCounts, h_forward_binCounts, MAX_BINS * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_forward_binBitMask, h_forward_binBitMask, binBitMaskSize * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_forward_firstNonEmptyMask, &forwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_forward_lastNonEmptyMask, &forwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(d_forward_binBitMask, h_forward_binBitMask, binBitMaskSize * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(d_forward_firstNonEmptyMask, &forwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(d_forward_lastNonEmptyMask, &forwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
 
     // --- Initialize backward search goal node ---
     BiNode h_goalNode;
@@ -221,17 +221,17 @@ int main(int argc, char** argv) {
     h_backward_binCounts[goalBin] = 1;
     h_backward_openListBins[goalBin * MAX_BIN_SIZE] = goalNodeId;
 
-    uint64_t *h_backward_binBitMask = (uint64_t*)malloc(binBitMaskSize * sizeof(uint64_t));
-    memset(h_backward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t));
-    int backwardMaskIndex = goalBin / 64;
-    uint64_t backwardMask = 1ULL << (goalBin % 64);
-    h_backward_binBitMask[backwardMaskIndex] |= backwardMask;
+    // uint64_t *h_backward_binBitMask = (uint64_t*)malloc(binBitMaskSize * sizeof(uint64_t));
+    // memset(h_backward_binBitMask, 0, binBitMaskSize * sizeof(uint64_t));
+    // int backwardMaskIndex = goalBin / 64;
+    // uint64_t backwardMask = 1ULL << (goalBin % 64);
+    // h_backward_binBitMask[backwardMaskIndex] |= backwardMask;
 
     CUDA_CHECK(cudaMemcpy(d_backward_openListBins, h_backward_openListBins, MAX_BINS * MAX_BIN_SIZE * sizeof(int), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_backward_binCounts, h_backward_binCounts, MAX_BINS * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_backward_binBitMask, h_backward_binBitMask, binBitMaskSize * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_backward_firstNonEmptyMask, &backwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_backward_lastNonEmptyMask, &backwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(d_backward_binBitMask, h_backward_binBitMask, binBitMaskSize * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(d_backward_firstNonEmptyMask, &backwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
+    // CUDA_CHECK(cudaMemcpy(d_backward_lastNonEmptyMask, &backwardMaskIndex, sizeof(int), cudaMemcpyHostToDevice));
 
     // --- Allocate variable to track total expanded nodes ---
     int *d_totalExpandedNodes;
@@ -285,11 +285,6 @@ int main(int argc, char** argv) {
     dim3 gridDim(numBlocks);
     dim3 blockDim(threadsPerBlock);
 
-    // --- Create streams for concurrent kernel execution ---
-    cudaStream_t forwardStream, backwardStream;
-    CUDA_CHECK(cudaStreamCreate(&forwardStream));
-    CUDA_CHECK(cudaStreamCreate(&backwardStream));
-
     // --- Prepare kernel arguments for the bidirectional kernel ---
     // For the forward search, pass forward = true and target = goalNodeId.
     void *kernelArgsForward[] = {
@@ -302,37 +297,25 @@ int main(int argc, char** argv) {
         (void *)&d_nodes,
         (void *)&d_forward_openListBins,
         (void *)&d_forward_binCounts,
-        (void *)&d_forward_binBitMask,
         (void *)&d_forward_expansionBuffers,
         (void *)&d_forward_expansionCounts,
         (void *)&d_backward_openListBins,
         (void *)&d_backward_binCounts,
-        (void *)&d_backward_binBitMask,
         (void *)&d_backward_expansionBuffers,
         (void *)&d_backward_expansionCounts,
         (void *)&d_found,
         (void *)&d_path,
         (void *)&d_pathLength,
-        (void *)&binBitMaskSize,
         (void *)&frontierSize,
         (void *)&d_totalExpandedNodes,
         (void *)&d_expandedNodes,
-        (void *)&d_forward_firstNonEmptyMask,
-        (void *)&d_forward_lastNonEmptyMask,
         (void *)&d_bidirectionalState
     };
 
     // --- Launch the forward and backward kernels concurrently ---
-    CUDA_CHECK(cudaLaunchCooperativeKernel((void *)biAStarMultipleBucketsSingleKernel, gridDim, blockDim, kernelArgsForward, 0, forwardStream));
+    CUDA_CHECK(cudaLaunchCooperativeKernel((void *)biAStarMultipleBucketsSingleKernel, gridDim, blockDim, kernelArgsForward, 0));
     CUDA_KERNEL_CHECK();
-
-
-    // CUDA_CHECK(cudaDeviceSynchronize()); // Wait for the forward kernel to finish before launching the backward kernel
-    // Synchronize both streams
-    CUDA_CHECK(cudaStreamSynchronize(forwardStream));
-    // CUDA_CHECK(cudaStreamSynchronize(backwardStream));
-    CUDA_CHECK(cudaStreamDestroy(forwardStream));
-    // CUDA_CHECK(cudaStreamDestroy(backwardStream));
+    CUDA_CHECK(cudaDeviceSynchronize()); // Wait for the forward kernel to finish before launching the backward kernel
 
     auto endTime = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsedSeconds = endTime - startTime;
@@ -406,12 +389,12 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaFree(d_grid));
     CUDA_CHECK(cudaFree(d_forward_openListBins));
     CUDA_CHECK(cudaFree(d_forward_binCounts));
-    CUDA_CHECK(cudaFree(d_forward_binBitMask));
+    // CUDA_CHECK(cudaFree(d_forward_binBitMask));
     CUDA_CHECK(cudaFree(d_forward_expansionBuffers));
     CUDA_CHECK(cudaFree(d_forward_expansionCounts));
     CUDA_CHECK(cudaFree(d_backward_openListBins));
     CUDA_CHECK(cudaFree(d_backward_binCounts));
-    CUDA_CHECK(cudaFree(d_backward_binBitMask));
+    // CUDA_CHECK(cudaFree(d_backward_binBitMask));
     CUDA_CHECK(cudaFree(d_backward_expansionBuffers));
     CUDA_CHECK(cudaFree(d_backward_expansionCounts));
     CUDA_CHECK(cudaFree(d_forward_firstNonEmptyMask));
@@ -419,16 +402,18 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaFree(d_backward_firstNonEmptyMask));
     CUDA_CHECK(cudaFree(d_backward_lastNonEmptyMask));
     CUDA_CHECK(cudaFree(d_totalExpandedNodes));
+    CUDA_CHECK(cudaFree(d_expandedNodes));
+    CUDA_CHECK(cudaFree(d_bidirectionalState));
 
     // --- Cleanup host memory ---
     free(h_grid);
     free(h_path);
     free(h_forward_binCounts);
     free(h_forward_openListBins);
-    free(h_forward_binBitMask);
+    // free(h_forward_binBitMask);
     free(h_backward_binCounts);
     free(h_backward_openListBins);
-    free(h_backward_binBitMask);
+    // free(h_backward_binBitMask);
 
     return 0;
 }

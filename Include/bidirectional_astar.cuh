@@ -47,12 +47,12 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     int startNodeId, int targetNodeId,                   // for forward search, this is the goal; for backward, the start
     BiNode *nodes,                      // array of BiNodes (both forward and backward fields integrated)
     // Open list arrays for forward search
-    int *forward_openListBins, int *forward_binCounts, unsigned long long *forward_binBitMask,
+    int *forward_openListBins, int *forward_binCounts,
     int *forward_expansionBuffers, int *forward_expansionCounts,
     // Open list arrays for backward search
-    int *backward_openListBins, int *backward_binCounts, unsigned long long *backward_binBitMask,
+    int *backward_openListBins, int *backward_binCounts,
     int *backward_expansionBuffers, int *backward_expansionCounts,
     bool *found, int *path, int *pathLength,
-    int binBitMaskSize, int frontierSize, 
-    int *totalExpandedNodes, int* expandedNodes, int* firstNonEmptyMask, int* lastNonEmptyMask,
+    int frontierSize, 
+    int *totalExpandedNodes, int* expandedNodes,
     BidirectionalState* state);
