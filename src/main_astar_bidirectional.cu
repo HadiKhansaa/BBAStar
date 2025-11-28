@@ -279,8 +279,7 @@ int main(int argc, char** argv) {
     // --- Set grid/block dimensions for kernel launch ---
     int frontierSize = 128;
     int threadsPerBlock = 256;
-    // int totalThreadsKernel = frontierSize * 32; // we will usually only use frontierSize * 16, but we do this for an edge case
-    int totalThreadsKernel = 40000;
+    int totalThreadsKernel = 40000; // we will usually only use frontierSize * 16, but we do this for an edge case
     int numBlocks = (totalThreadsKernel + threadsPerBlock - 1) / threadsPerBlock;
     dim3 gridDim(numBlocks);
     dim3 blockDim(threadsPerBlock);
@@ -347,8 +346,8 @@ int main(int argc, char** argv) {
             float movementCost = isDiagonal ? sqrtf(2.0f) : 1.0f;
             totalCost += movementCost;
         }
-        std::cout << "Path found with length " << h_pathLength 
-                  << " and total cost " << totalCost << std::endl;
+        // std::cout << "Path found with length " << h_pathLength 
+        //           << " and total cost " << totalCost << std::endl;
 
         std::cout << GREEN << "Execution time (Bidirectional A* kernel): " 
                   << elapsedSeconds.count() << " seconds" << RESET << std::endl;

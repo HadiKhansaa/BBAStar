@@ -17,7 +17,7 @@ NVCC          := nvcc
 HOST_COMPILER := cl # Adjust if needed (e.g. full path)
 
 # Common NVCC flags (adjust as necessary)
-NVCC_FLAGS    := -I $(INC_DIR) -ccbin="$(HOST_COMPILER)" -arch=native
+NVCC_FLAGS    := -I $(INC_DIR) -ccbin="$(HOST_COMPILER)" -arch=sm_89
 
 # Default rule: build release target
 all: $(BIN_DIR)/$(TARGET)
@@ -25,7 +25,7 @@ all: $(BIN_DIR)/$(TARGET)
 # Release build rule
 $(BIN_DIR)/$(TARGET): $(CU_FILES) $(CPP_FILES)
 	mkdir $(BIN_DIR) 2>NUL || echo Bin directory already exists.
-	$(NVCC) $(NVCC_FLAGS) -O3 -g -lineinfo -o $@ $^
+	$(NVCC) $(NVCC_FLAGS) -O3 -use_fast_math -o $@ $^
 
 # Debug build rule
 debug: $(BIN_DIR)/$(DEBUG_TARGET)
