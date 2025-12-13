@@ -277,10 +277,10 @@ int main(int argc, char** argv) {
     auto startTime = std::chrono::high_resolution_clock::now();
 
     // --- Set grid/block dimensions for kernel launch ---
-    int frontierSize = 128;
-    int threadsPerBlock = 256;
-    int totalThreadsKernel = 40000; // we will usually only use frontierSize * 16, but we do this for an edge case
-    int numBlocks = (totalThreadsKernel + threadsPerBlock - 1) / threadsPerBlock;
+    int frontierSize = 1;
+    int threadsPerBlock = 128;
+    // int totalThreadsKernel = 40000; // we will usually only use frontierSize * 16, but we do this for an edge case
+    int numBlocks = (TOTAL_THREADS + threadsPerBlock - 1) / threadsPerBlock;
     dim3 gridDim(numBlocks);
     dim3 blockDim(threadsPerBlock);
 

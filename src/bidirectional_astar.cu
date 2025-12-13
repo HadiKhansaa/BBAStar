@@ -56,11 +56,11 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int totalThreads = gridGroup.size();   
     // Main bidirectional A* loop.
-    while (!state->d_done_forward && !state->d_done_backward)
+    while (!state->d_done_forward || !state->d_done_backward)
     {
         // Thread 0 of block 0 computes the active bucket range forward.
         // Thread 1 of block 0 computes the active bucket range backward.
-        if (blockIdx.x == 0 && (threadIdx.x == 0 || threadIdx.x == 1)) {
+        if (blockIdx.x == 0 && ((threadIdx.x == 0 && !state->d_done_forward) || (threadIdx.x == 1 && !state->d_done_backward))) {
             const bool isForward = (threadIdx.x == 0);
 
             // choose the right arrays
@@ -142,21 +142,21 @@ __global__ void biAStarMultipleBucketsSingleKernel(
 
             // debugging
 // #ifdef DEBUG
-            // if(threadIdx.x == 0)
-            // {
-            //     printf("current best cost: %d\n", state->globalBestCost);
+            if(threadIdx.x == 0)
+            {
+                printf("current best cost: %d\n", state->globalBestCost);
 
-            //     printf("Active elements forward: %d\n", localTotal);
-            //     printf("Bucket range forward: %d - %d\n\n", state->global_forward_bucketRangeStart, state->global_forward_bucketRangeEnd);
+                printf("Active elements forward: %d\n", localTotal);
+                printf("Bucket range forward: %d - %d\n\n", state->global_forward_bucketRangeStart, state->global_forward_bucketRangeEnd);
 
-            // }
-            // if(threadIdx.x == 1)
-            // {
-            //     printf("Active elements backward: %d\n", localTotal);
-            //     printf("Bucket range backward: %d - %d\n\n", state->global_backward_bucketRangeStart, state->global_backward_bucketRangeEnd);
-            // }
+            }
+            if(threadIdx.x == 1)
+            {
+                printf("Active elements backward: %d\n", localTotal);
+                printf("Bucket range backward: %d - %d\n\n", state->global_backward_bucketRangeStart, state->global_backward_bucketRangeEnd);
+            }
 
-            // wait(10000000);
+            wait(10000000);
 // #endif
         }
 
@@ -169,7 +169,22 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             }
         }
 
+        // if (blockIdx.x == 0 && threadIdx.x == 0) {
+        //     if (state->global_forward_bucketRangeStart != -1 && state->global_backward_bucketRangeStart != -1 && state->globalBestCost != INT_MAX) {
+        //         unsigned int minFBase = DIAGONAL_COST * (width - 1);
+        //         unsigned int minForward = state->global_forward_bucketRangeStart * BUCKET_F_RANGE + minFBase;
+        //         unsigned int minBackward = state->global_backward_bucketRangeStart * BUCKET_F_RANGE + minFBase;
+        //         if ((minForward + minBackward) >= state->globalBestCost * 1.9) {
+        //             state->d_done_forward = true;
+        //             state->d_done_backward = true;
+        //         }
+        //     }
+        // }
+
         gridGroup.sync(); // sync all blocks
+
+        // if(state->d_done_forward || state->d_done_backward)
+        //     printf("%d %d\n", state->d_done_forward, state->d_done_backward);
 
         if (state->d_done_forward && state->d_done_backward)
             break;
@@ -326,7 +341,6 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                                 }
                             }
 
-                            // bool localPathFound = false;
                             // Check if this neighbor has already been reached from the opposite search.
                             if (threadAssignment == FORWARD && nodes[neighborId].g_backward != INT_MAX) {
                                 unsigned int candidateCost = nodes[neighborId].g_forward + nodes[neighborId].g_backward;
@@ -435,7 +449,9 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                     for (int i = threadIdx.x; i < leftover; i += blockDim.x) {
                         int src = bucket * MAX_BIN_SIZE + (usedHere + i);
                         int dst = bucket * MAX_BIN_SIZE + i;
+                        int id = openListBinsPtr[src];
                         openListBinsPtr[dst] = openListBinsPtr[src];
+                        nodes[id].openListAddress_forward = dst;   // or _forward in the forward section
                     }
                 }
                 __syncthreads();
@@ -445,7 +461,9 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                     for (int i = threadIdx.x; i < eCount; i += blockDim.x) {
                         int dst = bucket * MAX_BIN_SIZE + leftover + i;
                         int src = bucket * MAX_BIN_SIZE + i;   // expansion buffer is always 0..eCount-1
-                        openListBinsPtr[dst] = expansionBuffersPtr[src];
+                        int id = expansionBuffersPtr[src];
+                        openListBinsPtr[dst] = id;
+                        nodes[id].openListAddress_forward = dst;   // or _forward
                     }
                 }
 
@@ -501,7 +519,9 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                     for (int i = threadIdx.x; i < leftover; i += blockDim.x) {
                         int src = bucket * MAX_BIN_SIZE + (usedHere + i);
                         int dst = bucket * MAX_BIN_SIZE + i;
+                        int id = openListBinsPtr[src];
                         openListBinsPtr[dst] = openListBinsPtr[src];
+                        nodes[id].openListAddress_backward = dst;   // or _forward in the forward section
                     }
                 }
                 __syncthreads();
@@ -510,7 +530,9 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                     for (int i = threadIdx.x; i < eCount; i += blockDim.x) {
                         int dst = bucket * MAX_BIN_SIZE + leftover + i;
                         int src = bucket * MAX_BIN_SIZE + i;
+                        int id = expansionBuffersPtr[src];
                         openListBinsPtr[dst] = expansionBuffersPtr[src];
+                        nodes[id].openListAddress_backward = dst;   // or _forward
                     }
                 }
 

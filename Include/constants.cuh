@@ -2,9 +2,9 @@
 
 #define MAX_NEIGHBORS 8 // 8-directional movement
 
-#define BUCKET_F_RANGE 100
+#define BUCKET_F_RANGE 1500
 #define MAX_BINS 20000         // Maximum number of bins (adjust as needed) // should be adjusted dynamically
-#define MAX_BIN_SIZE 20000     // Maximum number of nodes per bin (adjust as needed) // should be adjusted dynamically
+#define MAX_BIN_SIZE 30000     // Maximum number of nodes per bin (adjust as needed) // should be adjusted dynamically
 #define SCALE_FACTOR 1000     // Scale factor for cost
 #define DIAGONAL_COST 1414      // Cost for diagonal movement (sqrt(2) * SCALE_FACTOR)
 
