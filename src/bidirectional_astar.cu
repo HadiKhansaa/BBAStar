@@ -142,21 +142,21 @@ __global__ void biAStarMultipleBucketsSingleKernel(
 
             // debugging
 // #ifdef DEBUG
-            if(threadIdx.x == 0)
-            {
-                printf("current best cost: %d\n", state->globalBestCost);
+            // if(threadIdx.x == 0)
+            // {
+            //     printf("current best cost: %d\n", state->globalBestCost);
 
-                printf("Active elements forward: %d\n", localTotal);
-                printf("Bucket range forward: %d - %d\n\n", state->global_forward_bucketRangeStart, state->global_forward_bucketRangeEnd);
+            //     printf("Active elements forward: %d\n", localTotal);
+            //     printf("Bucket range forward: %d - %d\n\n", state->global_forward_bucketRangeStart, state->global_forward_bucketRangeEnd);
 
-            }
-            if(threadIdx.x == 1)
-            {
-                printf("Active elements backward: %d\n", localTotal);
-                printf("Bucket range backward: %d - %d\n\n", state->global_backward_bucketRangeStart, state->global_backward_bucketRangeEnd);
-            }
+            // }
+            // if(threadIdx.x == 1)
+            // {
+            //     printf("Active elements backward: %d\n", localTotal);
+            //     printf("Bucket range backward: %d - %d\n\n", state->global_backward_bucketRangeStart, state->global_backward_bucketRangeEnd);
+            // }
 
-            wait(10000000);
+            // wait(10000000);
 // #endif
         }
 
@@ -377,7 +377,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
 
                                         unsigned int offset = binForNghbr * MAX_BIN_SIZE + pos;
                                         expansionBuffersPtr[offset] = neighborId;
-                                        threadAssignment == FORWARD ? nodes[neighborId].openListAddress_forward = offset : nodes[neighborId].openListAddress_backward = offset;
+                                        // threadAssignment == FORWARD ? nodes[neighborId].openListAddress_forward = offset : nodes[neighborId].openListAddress_backward = offset;
 
                                         // printf("Adding neighbor %d to expansion buffer %d\n", neighborId, binForNghbr);
                                     } else {

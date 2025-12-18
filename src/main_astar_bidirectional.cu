@@ -69,7 +69,8 @@ int main(int argc, char** argv) {
     // if maze or zigzag set BUCKET_F_RANGE to 1000000
     if (gridType == "maze" || gridType == "zigzag") {
         #undef BUCKET_F_RANGE
-        #define BUCKET_F_RANGE 1000000
+        #define BUCKET_F_RANGE 10000
+        // printf("Setting BUCKET_F_RANGE to %d for maze/zigzag grid type.\n", BUCKET_F_RANGE);
     }
 
     // Ensure start and goal are free.

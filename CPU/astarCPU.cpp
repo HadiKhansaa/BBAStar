@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <algorithm>
 
 #define INF_FLT 1e20f  // A large float value representing infinity
 #define GRID_WIDTH 10001  // Adjusted for demonstration
@@ -24,6 +25,20 @@ struct Node {
     bool opened;
 };
 
+// Bidirectional node structure (separate from Node to avoid touching your existing A*)
+struct BiNode {
+    int id;
+
+    float gF, hF, fF;   // forward (start -> goal)
+    int parentF;
+    bool closedF, openedF;
+
+    float gB, hB, fB;   // backward (goal -> start)
+    int parentB;
+    bool closedB, openedB;
+};
+
+
 // Heuristic function (Octile distance)
 float heuristic(int currentNodeId, int goalNodeId, int width) {
     int xCurrent = currentNodeId % width;
@@ -39,6 +54,41 @@ float heuristic(int currentNodeId, int goalNodeId, int width) {
     // return 0; // testing
     return dx + dy;
     return D * (dx + dy) + (D2 - 2 * D) * std::min(dx, dy);
+}
+
+
+// Function to load the grid from a compressed file
+bool loadCompressedGridFromFile(int *&grid, int &width, int &height, const std::string &filename) {
+    std::ifstream ifs(filename, std::ios::in | std::ios::binary);
+    if (!ifs) {
+        std::cerr << "Failed to open file for reading: " << filename << std::endl;
+        return false;
+    }
+
+    // Read grid dimensions
+    ifs.read(reinterpret_cast<char*>(&width), sizeof(int));
+    ifs.read(reinterpret_cast<char*>(&height), sizeof(int));
+
+    int gridSize = width * height;
+    grid = (int *)malloc(gridSize * sizeof(int));
+    if (grid == NULL) {
+        std::cerr << "Failed to allocate memory for grid\n";
+        ifs.close();
+        return false;
+    }
+
+    // Read compressed grid data
+    std::vector<unsigned char> compressedData((gridSize + 7) / 8, 0);
+    ifs.read(reinterpret_cast<char*>(compressedData.data()), compressedData.size());
+
+    // Decompress grid data
+    for (int i = 0; i < gridSize; ++i) {
+        grid[i] = (compressedData[i / 8] & (1 << (i % 8))) ? 1 : 0;
+    }
+
+    ifs.close();
+    std::cout << "Compressed grid loaded from " << filename << std::endl;
+    return true;
 }
 
 // Function to create a zigzag pattern in the grid
@@ -369,38 +419,257 @@ bool aStarCPU(const std::vector<int>& grid, int width, int height, int startNode
     return false;
 }
 
+// Bidirectional A* (CPU) implementation
+bool bidirectionalAStarCPU(const std::vector<int>& grid, int width, int height,
+                           int startNodeId, int goalNodeId,
+                           std::vector<int>& path, int& totalExpandedNodes) {
+    if (startNodeId == goalNodeId) {
+        path.clear();
+        path.push_back(startNodeId);
+        return true;
+    }
 
-// Function to load the grid from a compressed file
-bool loadCompressedGridFromFile(int *&grid, int &width, int &height, const std::string &filename) {
-    std::ifstream ifs(filename, std::ios::in | std::ios::binary);
-    if (!ifs) {
-        std::cerr << "Failed to open file for reading: " << filename << std::endl;
+    // Neighbor offsets for 8-directional movement
+    int neighborOffsets[8][2] = {
+        {0, -1}, {1, -1}, {1, 0}, {1, 1},
+        {0,  1}, {-1, 1}, {-1, 0}, {-1, -1}
+    };
+
+    const int N = width * height;
+
+    std::vector<BiNode> nodes(N);
+    for (int i = 0; i < N; ++i) {
+        nodes[i].id = i;
+
+        nodes[i].gF = INF_FLT; nodes[i].hF = 0.0f; nodes[i].fF = INF_FLT;
+        nodes[i].parentF = -1; nodes[i].closedF = false; nodes[i].openedF = false;
+
+        nodes[i].gB = INF_FLT; nodes[i].hB = 0.0f; nodes[i].fB = INF_FLT;
+        nodes[i].parentB = -1; nodes[i].closedB = false; nodes[i].openedB = false;
+    }
+
+    // Min-heap entries (f, id)
+    using PQItem = std::pair<float, int>;
+    auto cmp = [](const PQItem& a, const PQItem& b) { return a.first > b.first; };
+    std::priority_queue<PQItem, std::vector<PQItem>, decltype(cmp)> openF(cmp), openB(cmp);
+
+    // Init forward (start)
+    nodes[startNodeId].gF = 0.0f;
+    nodes[startNodeId].hF = heuristic(startNodeId, goalNodeId, width);
+    nodes[startNodeId].fF = nodes[startNodeId].gF + nodes[startNodeId].hF;
+    nodes[startNodeId].openedF = true;
+    openF.push({nodes[startNodeId].fF, startNodeId});
+
+    // Init backward (goal)
+    nodes[goalNodeId].gB = 0.0f;
+    nodes[goalNodeId].hB = heuristic(goalNodeId, startNodeId, width);
+    nodes[goalNodeId].fB = nodes[goalNodeId].gB + nodes[goalNodeId].hB;
+    nodes[goalNodeId].openedB = true;
+    openB.push({nodes[goalNodeId].fB, goalNodeId});
+
+    float bestPathCost = INF_FLT;
+    int meetingId = -1;
+
+    auto popValidForward = [&]() -> int {
+        while (!openF.empty()) {
+            const PQItem& top = openF.top();
+            float f = top.first;
+            int id = top.second;
+            openF.pop();
+            if (nodes[id].closedF) continue;
+            // lazy deletion: ignore stale entries
+            if (std::fabs(nodes[id].fF - f) > 1e-6f) continue;
+            return id;
+        }
+        return -1;
+    };
+
+    auto popValidBackward = [&]() -> int {
+        while (!openB.empty()) {
+            const PQItem& top = openB.top();
+            float f = top.first;
+            int id = top.second;
+            openB.pop();
+            if (nodes[id].closedB) continue;
+            if (std::fabs(nodes[id].fB - f) > 1e-6f) continue;
+            return id;
+        }
+        return -1;
+    };
+
+    auto peekMinF = [&]() -> float {
+        while (!openF.empty()) {
+            const PQItem& top = openF.top();
+            float f = top.first;
+            int id = top.second;
+            if (nodes[id].closedF || std::fabs(nodes[id].fF - f) > 1e-6f) {
+                openF.pop();
+                continue;
+            }
+            return f;
+        }
+        return INF_FLT;
+    };
+
+    auto peekMinB = [&]() -> float {
+        while (!openB.empty()) {
+            const PQItem& top = openB.top();
+            float f = top.first;
+            int id = top.second;
+            if (nodes[id].closedB || std::fabs(nodes[id].fB - f) > 1e-6f) {
+                openB.pop();
+                continue;
+            }
+            return f;
+        }
+        return INF_FLT;
+    };
+
+    while (!openF.empty() && !openB.empty()) {
+        float minF = peekMinF();
+        float minB = peekMinB();
+
+        // Termination condition (works best with consistent heuristics; still reasonable as a guard)
+        if (bestPathCost < INF_FLT && (minF + minB) >= bestPathCost) {
+            break;
+        }
+
+        // Expand the side with smaller current f
+        bool expandForward = (minF <= minB);
+
+        if (expandForward) {
+            int cur = popValidForward();
+            if (cur == -1) break;
+
+            nodes[cur].closedF = true;
+            ++totalExpandedNodes;
+
+            // If other side already closed this node, we found a connection candidate
+            if (nodes[cur].closedB) {
+                float cand = nodes[cur].gF + nodes[cur].gB;
+                if (cand < bestPathCost) {
+                    bestPathCost = cand;
+                    meetingId = cur;
+                }
+            }
+
+            int xCur = cur % width;
+            int yCur = cur / width;
+
+            for (int k = 0; k < 8; ++k) {
+                int dx = neighborOffsets[k][0];
+                int dy = neighborOffsets[k][1];
+                int xN = xCur + dx;
+                int yN = yCur + dy;
+                if (xN < 0 || xN >= width || yN < 0 || yN >= height) continue;
+
+                int nid = yN * width + xN;
+                if (grid[nid] != 0) continue;         // obstacle
+                if (nodes[nid].closedF) continue;
+
+                bool isDiag = (std::abs(dx) + std::abs(dy) == 2);
+                float moveCost = isDiag ? std::sqrt(2.0f) : 1.0f;
+
+                float tentativeG = nodes[cur].gF + moveCost;
+
+                if (!nodes[nid].openedF || tentativeG < nodes[nid].gF) {
+                    nodes[nid].parentF = cur;
+                    nodes[nid].gF = tentativeG;
+                    nodes[nid].hF = heuristic(nid, goalNodeId, width);
+                    nodes[nid].fF = nodes[nid].gF + nodes[nid].hF;
+
+                    nodes[nid].openedF = true;
+                    openF.push({nodes[nid].fF, nid});
+
+                    // If backward has seen this node, update best connection candidate
+                    if (nodes[nid].openedB) {
+                        float cand = nodes[nid].gF + nodes[nid].gB;
+                        if (cand < bestPathCost) {
+                            bestPathCost = cand;
+                            meetingId = nid;
+                        }
+                    }
+                }
+            }
+        } else {
+            int cur = popValidBackward();
+            if (cur == -1) break;
+
+            nodes[cur].closedB = true;
+            ++totalExpandedNodes;
+
+            if (nodes[cur].closedF) {
+                float cand = nodes[cur].gF + nodes[cur].gB;
+                if (cand < bestPathCost) {
+                    bestPathCost = cand;
+                    meetingId = cur;
+                }
+            }
+
+            int xCur = cur % width;
+            int yCur = cur / width;
+
+            for (int k = 0; k < 8; ++k) {
+                int dx = neighborOffsets[k][0];
+                int dy = neighborOffsets[k][1];
+                int xN = xCur + dx;
+                int yN = yCur + dy;
+                if (xN < 0 || xN >= width || yN < 0 || yN >= height) continue;
+
+                int nid = yN * width + xN;
+                if (grid[nid] != 0) continue;
+                if (nodes[nid].closedB) continue;
+
+                bool isDiag = (std::abs(dx) + std::abs(dy) == 2);
+                float moveCost = isDiag ? std::sqrt(2.0f) : 1.0f;
+
+                float tentativeG = nodes[cur].gB + moveCost;
+
+                if (!nodes[nid].openedB || tentativeG < nodes[nid].gB) {
+                    nodes[nid].parentB = cur;
+                    nodes[nid].gB = tentativeG;
+                    nodes[nid].hB = heuristic(nid, startNodeId, width);
+                    nodes[nid].fB = nodes[nid].gB + nodes[nid].hB;
+
+                    nodes[nid].openedB = true;
+                    openB.push({nodes[nid].fB, nid});
+
+                    if (nodes[nid].openedF) {
+                        float cand = nodes[nid].gF + nodes[nid].gB;
+                        if (cand < bestPathCost) {
+                            bestPathCost = cand;
+                            meetingId = nid;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (meetingId == -1 || bestPathCost >= INF_FLT) {
         return false;
     }
 
-    // Read grid dimensions
-    ifs.read(reinterpret_cast<char*>(&width), sizeof(int));
-    ifs.read(reinterpret_cast<char*>(&height), sizeof(int));
+    // Reconstruct path: start -> meeting
+    std::vector<int> left;
+    int t = meetingId;
+    while (t != -1) {
+        left.push_back(t);
+        t = nodes[t].parentF;
+    }
+    std::reverse(left.begin(), left.end()); // now start ... meeting
 
-    int gridSize = width * height;
-    grid = (int *)malloc(gridSize * sizeof(int));
-    if (grid == NULL) {
-        std::cerr << "Failed to allocate memory for grid\n";
-        ifs.close();
-        return false;
+    // Reconstruct path: meeting -> goal (using backward parents)
+    std::vector<int> right;
+    t = nodes[meetingId].parentB; // avoid duplicating meeting
+    while (t != -1) {
+        right.push_back(t);
+        t = nodes[t].parentB;
     }
 
-    // Read compressed grid data
-    std::vector<unsigned char> compressedData((gridSize + 7) / 8, 0);
-    ifs.read(reinterpret_cast<char*>(compressedData.data()), compressedData.size());
-
-    // Decompress grid data
-    for (int i = 0; i < gridSize; ++i) {
-        grid[i] = (compressedData[i / 8] & (1 << (i % 8))) ? 1 : 0;
-    }
-
-    ifs.close();
-    std::cout << "Compressed grid loaded from " << filename << std::endl;
+    path.clear();
+    path.insert(path.end(), left.begin(), left.end());
+    path.insert(path.end(), right.begin(), right.end());
     return true;
 }
 
@@ -463,31 +732,32 @@ int main(int argc, char** argv) {
     float obstacleRate = 0.2;
     std::string gridType = "";
     std::string gridPath = "";
+    bool useBidirectional = false;
+    int argOffset = 0;
 
-    if(argc == 2)
-    {
-        height = atoi(argv[1]);
-        width = atoi(argv[1]);
-    } else if (argc == 3)
-    {
-        height = atoi(argv[1]);
-        width = atoi(argv[1]);
-        obstacleRate = atoi(argv[2])/100.0;
+    if (argc > 1 && std::string(argv[1]) == "bidirectional") {
+        useBidirectional = true;
+        argOffset = 1;
     }
-    else if (argc == 4)
-    {
-        height = atoi(argv[1]);
-        width = atoi(argv[1]);
-        obstacleRate = atoi(argv[2])/100.0;
-        gridType = argv[3];
+
+    int i = 1 + argOffset;
+
+    if (i < argc) {
+        height = atoi(argv[i]);
+        width  = atoi(argv[i]);
+        i++;
     }
-    else if (argc == 5)
-    {
-        height = atoi(argv[1]);
-        width = atoi(argv[1]);
-        obstacleRate = atoi(argv[2])/100.0;
-        gridType = argv[3];
-        gridPath = argv[4];
+    if (i < argc) {
+        obstacleRate = atoi(argv[i]) / 100.0f;
+        i++;
+    }
+    if (i < argc) {
+        gridType = argv[i];
+        i++;
+    }
+    if (i < argc) {
+        gridPath = argv[i];
+        i++;
     }
     int gridSize = width * height;
 
@@ -498,10 +768,7 @@ int main(int argc, char** argv) {
     // Allocate and initialize grid
     std::vector<int> grid(gridSize, 0);
 
-    int* tempGrid = (int*)malloc(height*width*sizeof(int));
-
-    for(int i = 0; i< height*width; ++i)
-        grid[i] = tempGrid[i];
+    int* tempGrid = (int*)malloc(height * width * sizeof(int));
 
     if(gridPath!="")
     {
@@ -549,7 +816,13 @@ int main(int argc, char** argv) {
     auto startTime = std::chrono::high_resolution_clock::now();
 
     // Run A* algorithm
-    bool found = aStarCPU(grid, width, height, startNodeId, goalNodeId, nodes, path, totalExpandedNodes);
+    bool found = false;
+
+    if (useBidirectional) {
+        found = bidirectionalAStarCPU(grid, width, height, startNodeId, goalNodeId, path, totalExpandedNodes);
+    } else {
+        found = aStarCPU(grid, width, height, startNodeId, goalNodeId, nodes, path, totalExpandedNodes);
+    }
 
     auto endTime = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsedSeconds = endTime - startTime;

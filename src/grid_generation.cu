@@ -330,41 +330,69 @@ void generatePPMImage(const int *grid, int width, int height, const int *path, i
     std::cout << "Image saved to " << filename << std::endl;
 }
 
-// New function: visualizeAStarPathOnGrid
+// visualizeAStarPathOnGrid with:
+// - thick red path (output-space dilation)
+// - start/end as big blue dots (8x8 by default)
 void visualizeAStarPathOnGrid(const int *grid, int width, int height,
                               const int *path, int pathLength,
                               const int *expandedNodes, int expandedLength,
                               const std::string &filename) {
-    // Flags for path cells (red) and expanded cells (orange)
+    // Flags for original-grid cells
     std::vector<bool> isInPath(width * height, false);
     std::vector<bool> isExpanded(width * height, false);
 
-    // Mark path nodes
     for (int i = 0; i < pathLength; ++i) {
         int nodeId = path[i];
-        if (0 <= nodeId && nodeId < width * height) {
-            isInPath[nodeId] = true;
-        }
+        if (0 <= nodeId && nodeId < width * height) isInPath[nodeId] = true;
     }
-    // Mark expanded nodes
     for (int i = 0; i < expandedLength; ++i) {
         int nodeId = expandedNodes[i];
-        if (0 <= nodeId && nodeId < width * height) {
-            isExpanded[nodeId] = true;
-        }
+        if (0 <= nodeId && nodeId < width * height) isExpanded[nodeId] = true;
     }
+
+    // Infer start/end from the path (if present)
+    int startId = (pathLength > 0 ? path[0] : -1);
+    int goalId  = (pathLength > 0 ? path[pathLength - 1] : -1);
 
     // Determine output resolution (max 1000×1000)
     int outWidth  = (width  > 1000 ? 1000 : width);
     int outHeight = (height > 1000 ? 1000 : height);
 
-    // Compute how many grid cells map into one output pixel
+    // Map original grid -> output pixels
     int blockW = (width  > 1000 ? width  / outWidth  : 1);
     int blockH = (height > 1000 ? height / outHeight : 1);
 
     // RGB buffer, default white
     std::vector<unsigned char> image(outWidth * outHeight * 3, 255);
 
+    auto setPixel = [&](int x, int y, unsigned char r, unsigned char g, unsigned char b) {
+        if (x < 0 || x >= outWidth || y < 0 || y >= outHeight) return;
+        int idx = (y * outWidth + x) * 3;
+        image[idx]     = r;
+        image[idx + 1] = g;
+        image[idx + 2] = b;
+    };
+
+    auto getPixel = [&](int x, int y, unsigned char &r, unsigned char &g, unsigned char &b) {
+        int idx = (y * outWidth + x) * 3;
+        r = image[idx];
+        g = image[idx + 1];
+        b = image[idx + 2];
+    };
+
+    auto toOutXY = [&](int nodeId, int &ox, int &oy) -> bool {
+        if (nodeId < 0 || nodeId >= width * height) return false;
+        int x = nodeId % width;
+        int y = nodeId / width;
+        ox = x / blockW;
+        oy = y / blockH;
+        // clamp just in case integer division hits boundary
+        if (ox < 0) ox = 0; if (ox >= outWidth)  ox = outWidth - 1;
+        if (oy < 0) oy = 0; if (oy >= outHeight) oy = outHeight - 1;
+        return true;
+    };
+
+    // Base render (same logic as yours)
     for (int by = 0; by < outHeight; ++by) {
         for (int bx = 0; bx < outWidth; ++bx) {
             bool redFound    = false;
@@ -372,64 +400,89 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
             long sumR = 0, sumG = 0, sumB = 0;
             int count = 0;
 
-            // Block bounds in the original grid
             int y0 = by * blockH;
             int x0 = bx * blockW;
             int y1 = std::min(y0 + blockH, height);
             int x1 = std::min(x0 + blockW, width);
 
-            // Inspect each cell in this block
             for (int y = y0; y < y1; ++y) {
                 for (int x = x0; x < x1; ++x) {
                     int idx = y * width + x;
                     unsigned char r, g, b;
 
-                    if (isInPath[idx]) {
-                        // Path → red
-                        r = 255; g =   0; b =   0;
-                        redFound = true;
-                    }
-                    else if (isExpanded[idx]) {
-                        // Expanded → orange
-                        r = 255; g = 165; b =   0;
-                        orangeFound = true;
-                    }
-                    else if (grid[idx] == 1) {
-                        // Obstacle → black
-                        r = g = b = 0;
-                    }
-                    else {
-                        // Free → white
-                        r = g = b = 255;
-                    }
+                    if (isInPath[idx]) { r = 255; g =   0; b =   0; redFound = true; }
+                    else if (isExpanded[idx]) { r = 255; g = 165; b =   0; orangeFound = false; }
+                    else if (grid[idx] == 1) { r = g = b = 0; }
+                    else { r = g = b = 255; }
 
-                    sumR += r;
-                    sumG += g;
-                    sumB += b;
-                    ++count;
+                    sumR += r; sumG += g; sumB += b; ++count;
                 }
             }
 
             unsigned char outR, outG, outB;
-            if (redFound) {
-                outR = 255; outG =   0; outB =   0;
-            }
-            else if (orangeFound) {
-                outR = 255; outG = 165; outB =   0;
-            }
+            if (redFound) { outR = 255; outG = 0;   outB = 0; }
+            else if (orangeFound) { outR = 255; outG = 165; outB = 0; }
             else {
-                // average the block
                 outR = static_cast<unsigned char>(sumR / count);
                 outG = static_cast<unsigned char>(sumG / count);
                 outB = static_cast<unsigned char>(sumB / count);
             }
 
-            int outIdx = (by * outWidth + bx) * 3;
-            image[outIdx    ] = outR;
-            image[outIdx + 1] = outG;
-            image[outIdx + 2] = outB;
+            setPixel(bx, by, outR, outG, outB);
         }
     }
+
+    // --- Make the red path thicker (output-space dilation) ---
+    // radius=1 => ~3px thick, radius=2 => ~5px thick
+    const int pathRadius = 1; // change to 2 if you want thicker than ~3px
+    std::vector<unsigned char> redMask(outWidth * outHeight, 0);
+
+    // Build an output mask from original path nodes
+    for (int i = 0; i < pathLength; ++i) {
+        int nodeId = path[i];
+        int ox, oy;
+        if (toOutXY(nodeId, ox, oy)) redMask[oy * outWidth + ox] = 1;
+    }
+
+    // Dilate
+    std::vector<unsigned char> dilated(outWidth * outHeight, 0);
+    for (int y = 0; y < outHeight; ++y) {
+        for (int x = 0; x < outWidth; ++x) {
+            if (!redMask[y * outWidth + x]) continue;
+            for (int dy = -pathRadius; dy <= pathRadius; ++dy) {
+                for (int dx = -pathRadius; dx <= pathRadius; ++dx) {
+                    int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || nx >= outWidth || ny < 0 || ny >= outHeight) continue;
+                    dilated[ny * outWidth + nx] = 1;
+                }
+            }
+        }
+    }
+
+    // Paint thick path in red (overrides whatever is underneath)
+    for (int y = 0; y < outHeight; ++y) {
+        for (int x = 0; x < outWidth; ++x) {
+            if (dilated[y * outWidth + x]) setPixel(x, y, 255, 0, 0);
+        }
+    }
+
+    // --- Draw start/end as big blue "dots" (8x8 squares) ---
+    const int dotSize = 32;      // 8x8
+    const int halfA   = dotSize / 2;     // 4
+    const int halfB   = dotSize - halfA; // 4 (so even sizes stay 8 total)
+
+    auto drawBlueDot = [&](int nodeId) {
+        int cx, cy;
+        if (!toOutXY(nodeId, cx, cy)) return;
+        for (int y = cy - halfA; y < cy + halfB; ++y) {
+            for (int x = cx - halfA; x < cx + halfB; ++x) {
+                setPixel(x, y, 0, 0, 255);
+            }
+        }
+    };
+
+    drawBlueDot(startId);
+    drawBlueDot(goalId);
 
     // Write PNG
     if (stbi_write_png(filename.c_str(), outWidth, outHeight, 3, image.data(), outWidth * 3)) {
@@ -438,6 +491,7 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
         std::cerr << "Failed to save image to " << filename << "\n";
     }
 }
+
 
 // int main(int argc, char** argv)
 // {
