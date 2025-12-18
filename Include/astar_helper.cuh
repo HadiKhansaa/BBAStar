@@ -61,7 +61,7 @@ __host__ __device__ inline unsigned int heuristic(int currentNodeId, int goalNod
 __host__ __device__ inline unsigned int binForNode(unsigned int fValue, int width) {
     unsigned int minFValue = DIAGONAL_COST * (width-1);
     unsigned int adjustedF =  fValue - minFValue; 
-    return (adjustedF / BUCKET_F_RANGE);
+    return (adjustedF / BUCKET_F_RANGE) % MAX_BINS;
 }
 
 // This function reconstructs a bidirectional path.

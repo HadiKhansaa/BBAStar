@@ -171,7 +171,7 @@ int main(int argc, char** argv) {
     
     CUDA_CHECK(cudaMemcpy(&d_nodes[startNodeId], &h_startNode, sizeof(BiNode), cudaMemcpyHostToDevice));
 
-    int startBin = (int)((h_startNode.f_forward - minFValue) / BUCKET_F_RANGE);
+    int startBin = (int)((h_startNode.f_forward - minFValue) / BUCKET_F_RANGE) % MAX_BINS;
     startBin = std::min(startBin, MAX_BINS - 1);
     startBin = std::max(startBin, 0); // for safety
 
@@ -211,7 +211,7 @@ int main(int argc, char** argv) {
 
     CUDA_CHECK(cudaMemcpy(&d_nodes[goalNodeId], &h_goalNode, sizeof(BiNode), cudaMemcpyHostToDevice));
 
-    int goalBin = (int)((h_goalNode.f_backward - minFValue) / BUCKET_F_RANGE);
+    int goalBin = (int)((h_goalNode.f_backward - minFValue) / BUCKET_F_RANGE) % MAX_BINS;
     goalBin = std::min(goalBin, MAX_BINS - 1);
     goalBin = std::max(goalBin, 0); // for safety
 
@@ -250,11 +250,11 @@ int main(int argc, char** argv) {
     h_bidirectionalState.d_done_forward = false;
     h_bidirectionalState.d_done_backward = false;
     h_bidirectionalState.globalBestCost = INT_MAX;
-    h_bidirectionalState.global_forward_bucketRangeStart = -1;
-    h_bidirectionalState.global_forward_bucketRangeEnd = -1;
+    h_bidirectionalState.global_forward_logicalBucketStart = -1;
+    h_bidirectionalState.global_forward_bucketCount = 0;
     h_bidirectionalState.global_forward_totalElementsInRange = 0;
-    h_bidirectionalState.global_backward_bucketRangeStart = -1;
-    h_bidirectionalState.global_backward_bucketRangeEnd = -1;
+    h_bidirectionalState.global_backward_logicalBucketStart = -1;
+    h_bidirectionalState.global_backward_bucketCount = 0;
     h_bidirectionalState.global_backward_totalElementsInRange = 0;
 
     // --- Initialize global best node for bidirectional search ---

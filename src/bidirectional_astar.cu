@@ -41,8 +41,6 @@ __global__ void biAStarMultipleBucketsSingleKernel(
 {
     // thread local variables for direction of search
     ThreadAssignment threadAssignment = UNASSIGNNED; // to be determined for each thread
-    int bucketRangeStart; // to be determined for each thread
-    int bucketRangeEnd;   // to be determined for each thread
     int *binCountsPtr; // to be determined for each thread
     int *openListBinsPtr; // to be determined for each thread
     int *expansionBuffersPtr; // to be determined for each thread
@@ -66,57 +64,65 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             // choose the right arrays
             binCountsPtr = isForward ? forward_binCounts : backward_binCounts;
 
-            // get previous bucket start for this direction
-            int prevStart = isForward
-                ? state->global_forward_bucketRangeStart
-                : state->global_backward_bucketRangeStart;
+            // get previous logical bucket for this direction
+            int prevLogical = isForward
+                ? state->global_forward_logicalBucketStart
+                : state->global_backward_logicalBucketStart;
 
             // on the first iteration or invalid value, start from 0
-            if (prevStart < 0 || prevStart >= MAX_BINS)
-                prevStart = 0;
+            if (prevLogical < 0)
+                prevLogical = 0;
 
-            int localStart = -1;
-            int localEnd   = -1;
+            // int localStart = -1;
+            // int localEnd   = -1;
             int localTotal = 0;
+            int logicalStart = -1;
 
-            // 1) find first non-empty bucket at or after prevStart
-            int b = prevStart;
-            while (b < MAX_BINS && binCountsPtr[b] == 0) {
-                ++b;
+            // 1) find first non-empty bucket at or after prevLogical
+            int searchCount = 0;
+            int logicalBucket = prevLogical;
+            while (searchCount < MAX_BINS && binCountsPtr[logicalBucket % MAX_BINS] == 0) {
+                ++logicalBucket;
+                ++searchCount;
             }
 
-            if (b == MAX_BINS) {
+            if (searchCount == MAX_BINS) {
                 // no work in this direction
                 if (isForward) {
                     state->d_done_forward = true;
-                    state->global_forward_bucketRangeStart        = -1;
-                    state->global_forward_bucketRangeEnd          = -1;
+                    state->global_forward_logicalBucketStart      = -1;
+                    state->global_forward_bucketCount             = 0;
                     state->global_forward_totalElementsInRange    = 0;
                 } else {
                     state->d_done_backward = true;
-                    state->global_backward_bucketRangeStart       = -1;
-                    state->global_backward_bucketRangeEnd         = -1;
+                    state->global_backward_logicalBucketStart     = -1;
+                    state->global_backward_bucketCount            = 0;
                     state->global_backward_totalElementsInRange   = 0;
                 }
             } else {
-                localStart = b;
+                logicalStart = logicalBucket;
 
                 // 2) extend bucket range to the right until we reach frontierSize
-                for (int i = b; i < MAX_BINS && localTotal < frontierSize; ++i) {
-                    int c = binCountsPtr[i];
+                int bucketCount = 0;
+                for (int i = 0; i < MAX_BINS && localTotal < frontierSize; ++i) {
+                    int logical = logicalStart + i;
+                    int circular = logical % MAX_BINS;
+                    int c = binCountsPtr[circular];
                     if (c > 0) {
-                        localEnd = i;
+                        bucketCount = i + 1;
                         localTotal += c;
                     }
                 }
 
+                assert(bucketCount < MAX_BINS);
+
                 if (isForward) {
-                    state->global_forward_bucketRangeStart        = localStart;
-                    state->global_forward_bucketRangeEnd          = localEnd;
+                    state->global_forward_logicalBucketStart      = logicalStart;
+                    state->global_forward_bucketCount             = bucketCount;
                     state->global_forward_totalElementsInRange    = localTotal;
                 } else {
-                    state->global_backward_bucketRangeStart       = localStart;
-                    state->global_backward_bucketRangeEnd         = localEnd;
+                    state->global_backward_logicalBucketStart     = logicalStart;
+                    state->global_backward_bucketCount            = bucketCount;
                     state->global_backward_totalElementsInRange   = localTotal;
                 }
             }
@@ -125,20 +131,18 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             unsigned int minFBase = DIAGONAL_COST * (width - 1);
 
             if (isForward &&
-                state->global_forward_bucketRangeStart != -1 &&
-                state->global_forward_bucketRangeStart * BUCKET_F_RANGE + minFBase >= state->globalBestCost)
+                state->global_forward_logicalBucketStart != -1 &&
+                state->global_forward_logicalBucketStart * BUCKET_F_RANGE + minFBase >= state->globalBestCost)
             {
                 state->d_done_forward = true;
             }
 
             if (!isForward &&
-                state->global_backward_bucketRangeStart != -1 &&
-                state->global_backward_bucketRangeStart * BUCKET_F_RANGE + minFBase >= state->globalBestCost)
+                state->global_backward_logicalBucketStart != -1 &&
+                state->global_backward_logicalBucketStart * BUCKET_F_RANGE + minFBase >= state->globalBestCost)
             {
                 state->d_done_backward = true;
             }
-
-
 
             // debugging
 // #ifdef DEBUG
@@ -147,33 +151,33 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             //     printf("current best cost: %d\n", state->globalBestCost);
 
             //     printf("Active elements forward: %d\n", localTotal);
-            //     printf("Bucket range forward: %d - %d\n\n", state->global_forward_bucketRangeStart, state->global_forward_bucketRangeEnd);
+            //     printf("Bucket range forward: %d - %d\n\n", state->global_forward_logicalBucketStart, state->global_forward_bucketCount);
 
             // }
             // if(threadIdx.x == 1)
             // {
             //     printf("Active elements backward: %d\n", localTotal);
-            //     printf("Bucket range backward: %d - %d\n\n", state->global_backward_bucketRangeStart, state->global_backward_bucketRangeEnd);
+            //     printf("Bucket range backward: %d - %d\n\n", state->global_backward_logicalBucketStart, state->global_backward_bucketCount);
             // }
 
-            // wait(10000000);
+            // wait(1000000);
 // #endif
         }
 
-        // clear expansion count buffers
-        if(blockIdx.x == 0)
-        {
-            for(int i = threadIdx.x; i < MAX_BINS ; i += blockDim.x) {
-            forward_expansionCounts[i] = 0;
-            backward_expansionCounts[i] = 0;
-            }
-        }
+        // clear expansion count buffers (only for active range)
+        // if(blockIdx.x == 0)
+        // {
+        //     for(int i = threadIdx.x; i < MAX_BINS ; i += blockDim.x) {
+        //         forward_expansionCounts[i] = 0;
+        //         backward_expansionCounts[i] = 0;
+        //     }
+        // }
 
         // if (blockIdx.x == 0 && threadIdx.x == 0) {
-        //     if (state->global_forward_bucketRangeStart != -1 && state->global_backward_bucketRangeStart != -1 && state->globalBestCost != INT_MAX) {
+        //     if (state->global_backward_logicalBucketStart != -1 && state->global_backward_logicalBucketStart != -1 && state->globalBestCost != INT_MAX) {
         //         unsigned int minFBase = DIAGONAL_COST * (width - 1);
-        //         unsigned int minForward = state->global_forward_bucketRangeStart * BUCKET_F_RANGE + minFBase;
-        //         unsigned int minBackward = state->global_backward_bucketRangeStart * BUCKET_F_RANGE + minFBase;
+        //         unsigned int minForward = state->global_forward_logicalBucketStart * BUCKET_F_RANGE + minFBase;
+        //         unsigned int minBackward = state->global_backward_logicalBucketStart * BUCKET_F_RANGE + minFBase;
         //         if ((minForward + minBackward) >= state->globalBestCost * 1.9) {
         //             state->d_done_forward = true;
         //             state->d_done_backward = true;
@@ -234,8 +238,8 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         //     state->global_backward_totalElementsInRange * MAX_NEIGHBORS <= TOTAL_THREADS);
 
         // decide thread <-> direction
-        bucketRangeStart = threadAssignment == FORWARD ? state->global_forward_bucketRangeStart : state->global_backward_bucketRangeStart;
-        bucketRangeEnd = threadAssignment == FORWARD ? state->global_forward_bucketRangeEnd : state->global_backward_bucketRangeEnd;
+        int logicalBucketStart = threadAssignment == FORWARD ? state->global_forward_logicalBucketStart : state->global_backward_logicalBucketStart;
+        int bucketCount = threadAssignment == FORWARD ? state->global_forward_bucketCount : state->global_backward_bucketCount;
 
         openListBinsPtr       = threadAssignment == FORWARD ? forward_openListBins      : backward_openListBins;
         expansionBuffersPtr   = threadAssignment == FORWARD ? forward_expansionBuffers  : backward_expansionBuffers;
@@ -247,7 +251,9 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         if (threadAssignment != UNASSIGNNED && threadPosition >= 0) {
             int localPos = threadPosition; // 0 .. (#pairs for this direction - 1)
 
-            for (int b = bucketRangeStart; b <= bucketRangeEnd; ++b) {
+            for (int i = 0; i < bucketCount; ++i) {
+                int logicalBucket = logicalBucketStart + i;
+                int b = logicalBucket % MAX_BINS;
                 int bucketSize = binCountsPtr[b] * MAX_NEIGHBORS;
                 if (localPos < bucketSize) {
                     assignedBucket = b;
@@ -271,8 +277,8 @@ __global__ void biAStarMultipleBucketsSingleKernel(
 
             // check if the current node is valid i.e. in the correct bucket
             unsigned int minFValue = DIAGONAL_COST * (width - 1);
-            unsigned int appropriateBucket = threadAssignment == FORWARD ? (currentNode.f_forward - minFValue)/BUCKET_F_RANGE
-             : (currentNode.f_backward - minFValue)/BUCKET_F_RANGE;
+            unsigned int appropriateBucket = (threadAssignment == FORWARD ? (currentNode.f_forward - minFValue)/BUCKET_F_RANGE
+             : (currentNode.f_backward - minFValue)/BUCKET_F_RANGE) % MAX_BINS;
 
 
             // Early pruning: skip if the current node’s f-value is not promising.
@@ -364,13 +370,21 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                                 // Compute the bin for the neighbor based on its updated f-value.
                                 unsigned int newF = threadAssignment == FORWARD ? nodes[neighborId].f_forward : nodes[neighborId].f_backward;
                                 unsigned int binForNghbr = binForNode(newF, width);
-                                assert(binForNghbr < MAX_BINS);
-                                binForNghbr = max(0, min(binForNghbr, MAX_BINS - 1));
+                                // binForNode already returns modulo MAX_BINS, so it's always < MAX_BINS
                                 
                                 if(newF < state->globalBestCost) // only expand if the f-value is less than the global best cost
                                 {
+                                    // Check if this bin is in the current active range
+                                    unsigned int minFValue = DIAGONAL_COST * (width - 1);
+                                    int logicalBin = (newF - minFValue) / BUCKET_F_RANGE;
+                                    int logicalStart = threadAssignment == FORWARD ? state->global_forward_logicalBucketStart : state->global_backward_logicalBucketStart;
+                                    int bucketCount = threadAssignment == FORWARD ? state->global_forward_bucketCount : state->global_backward_bucketCount;
+                                    bool inRange = (logicalBin >= logicalStart && logicalBin < logicalStart + bucketCount);
                                     
-                                    if (binForNghbr >= bucketRangeStart && binForNghbr <= bucketRangeEnd) {
+                                    // Only allow writes to future buckets within a safe range (not wrapping around to old buckets)
+                                    bool isSafeForWrite = (logicalBin >= logicalStart && logicalBin < logicalStart + MAX_BINS);
+                                    
+                                    if (inRange) {
                                         unsigned int pos = atomicAdd(&expansionCountsPtr[binForNghbr], 1);
 
                                         assert(pos < MAX_BIN_SIZE);
@@ -380,13 +394,19 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                                         // threadAssignment == FORWARD ? nodes[neighborId].openListAddress_forward = offset : nodes[neighborId].openListAddress_backward = offset;
 
                                         // printf("Adding neighbor %d to expansion buffer %d\n", neighborId, binForNghbr);
-                                    } else {
+                                    } else if (isSafeForWrite) {
+                                        // For buckets outside active range: use CAS to safely claim/clear before first write
+                                        // This prevents collision when physical bucket wraps from old logical bucket
                                         unsigned int pos = atomicAdd(&binCountsPtr[binForNghbr], 1);
+                                        
+                                        // If this is the first node in this bucket (pos==0), it was just cleared from 0->1
+                                        // which is safe. If pos>0, bucket is already in use for this logical bucket.
                                         assert(pos < MAX_BIN_SIZE);
                                         unsigned int offset = binForNghbr * MAX_BIN_SIZE + pos;
                                         openListBinsPtr[offset] = neighborId;
                                         threadAssignment == FORWARD ? nodes[neighborId].openListAddress_forward = offset : nodes[neighborId].openListAddress_backward = offset;
                                     }
+                                    // else: discard the node (would cause collision)
                                 }
                             }
                         }
@@ -409,8 +429,8 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             openListBinsPtr    = forward_openListBins;
             binCountsPtr       = forward_binCounts;
             expansionBuffersPtr= forward_expansionBuffers;
-            bucketRangeStart   = state->global_forward_bucketRangeStart;
-            bucketRangeEnd     = state->global_forward_bucketRangeEnd;
+            int logicalBucketStart = state->global_forward_logicalBucketStart;
+            int bucketCount        = state->global_forward_bucketCount;
 
             // Max forward nodes we could actually expand this iteration
             const int maxForwardNodesPerIter = TOTAL_THREADS_FORWARD / MAX_NEIGHBORS;
@@ -419,12 +439,14 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             int nodesExpandedForward  = min(nodesForwardInRange, maxForwardNodesPerIter);
             int remainingExpanded     = nodesExpandedForward;  // how many nodes we really expanded across buckets
 
-            for (int bucket = bucketRangeStart; bucket <= bucketRangeEnd; ++bucket) {
+            for (int i = 0; i < bucketCount; ++i) {
+                int logicalBucket = logicalBucketStart + i;
+                int bucket = logicalBucket % MAX_BINS;
                 int oldCount = binCountsPtr[bucket];           // nodes in open list before expansion
                 int eCount   = expansionCountsPtr[bucket];     // neighbors generated this iteration
 
                 if (oldCount == 0 && eCount == 0) {
-                    // nothing here
+                    // nothing here - already cleared
                     if (threadIdx.x == 0) {
                         binCountsPtr[bucket]       = 0;
                         expansionCountsPtr[bucket] = 0;
@@ -468,8 +490,8 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                 }
 
                 if (threadIdx.x == 0) {
-                    binCountsPtr[bucket]       = leftover + eCount;  // new size of bucket
-                    expansionCountsPtr[bucket] = 0;                  // reset expansion count
+                    binCountsPtr[bucket] = leftover + eCount;
+                    expansionCountsPtr[bucket] = 0;
                 }
                 __syncthreads();
             }
@@ -485,8 +507,8 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             openListBinsPtr    = backward_openListBins;
             binCountsPtr       = backward_binCounts;
             expansionBuffersPtr= backward_expansionBuffers;
-            bucketRangeStart   = state->global_backward_bucketRangeStart;
-            bucketRangeEnd     = state->global_backward_bucketRangeEnd;
+            int logicalBucketStart = state->global_backward_logicalBucketStart;
+            int bucketCount        = state->global_backward_bucketCount;
 
             // Max backward nodes we could actually expand this iteration
             const int maxBackwardNodesPerIter = TOTAL_THREADS_BACKWARDS / MAX_NEIGHBORS;
@@ -495,7 +517,9 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             int nodesExpandedBackward  = min(nodesBackwardInRange, maxBackwardNodesPerIter);
             int remainingExpanded      = nodesExpandedBackward;
 
-            for (int bucket = bucketRangeStart; bucket <= bucketRangeEnd; ++bucket) {
+            for (int i = 0; i < bucketCount; ++i) {
+                int logicalBucket = logicalBucketStart + i;
+                int bucket = logicalBucket % MAX_BINS;
                 int oldCount = binCountsPtr[bucket];
                 int eCount   = expansionCountsPtr[bucket];
 
@@ -537,7 +561,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                 }
 
                 if (threadIdx.x == 0) {
-                    binCountsPtr[bucket]       = leftover + eCount;
+                    binCountsPtr[bucket] = leftover + eCount;
                     expansionCountsPtr[bucket] = 0;
                 }
                 __syncthreads();

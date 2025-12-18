@@ -373,12 +373,12 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
         image[idx + 2] = b;
     };
 
-    auto getPixel = [&](int x, int y, unsigned char &r, unsigned char &g, unsigned char &b) {
-        int idx = (y * outWidth + x) * 3;
-        r = image[idx];
-        g = image[idx + 1];
-        b = image[idx + 2];
-    };
+    // auto getPixel = [&](int x, int y, unsigned char &r, unsigned char &g, unsigned char &b) {
+    //     int idx = (y * outWidth + x) * 3;
+    //     r = image[idx];
+    //     g = image[idx + 1];
+    //     b = image[idx + 2];
+    // };
 
     auto toOutXY = [&](int nodeId, int &ox, int &oy) -> bool {
         if (nodeId < 0 || nodeId >= width * height) return false;

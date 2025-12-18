@@ -30,13 +30,13 @@ struct BidirectionalState {
     unsigned int globalBestCost = INT_MAX;
     BiNode globalBestNode = {-1, INT_MAX, 0, INT_MAX, INT_MAX, 0, INT_MAX, -1, -1 };
 
-    // global variables for the active bucket range
-    int global_forward_bucketRangeStart = -1;
-    int global_forward_bucketRangeEnd = -1;
+    // Logical (unwrapped) bucket numbers for iteration and early stopping
+    int global_forward_logicalBucketStart = -1;
+    int global_forward_bucketCount = 0;  // number of buckets in range
     int global_forward_totalElementsInRange = 0;
 
-    int global_backward_bucketRangeStart = -1;
-    int global_backward_bucketRangeEnd = -1;
+    int global_backward_logicalBucketStart = -1;
+    int global_backward_bucketCount = 0;  // number of buckets in range
     int global_backward_totalElementsInRange = 0;
 };
 
