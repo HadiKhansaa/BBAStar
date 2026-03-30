@@ -2,7 +2,7 @@
 
 #define MAX_NEIGHBORS 8 // 8-directional movement
 
-#define BUCKET_F_RANGE 2500
+#define BUCKET_F_RANGE 2500000
 #define MAX_BINS 50           // Circular buffer size for bins
 #define MAX_BIN_SIZE 500000    // Maximum number of nodes per bin (increased for circular buffer)
 #define SCALE_FACTOR 1000     // Scale factor for cost

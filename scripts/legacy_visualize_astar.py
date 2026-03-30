@@ -1,3 +1,10 @@
+"""
+Legacy exploratory visualization helper kept for reference.
+
+This script is not part of the supported demo or benchmark workflow described
+in the README.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import math

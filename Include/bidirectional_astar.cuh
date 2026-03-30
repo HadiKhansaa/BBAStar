@@ -28,7 +28,7 @@ struct BidirectionalState {
     bool d_done_backward = false;
 
     unsigned int globalBestCost = INT_MAX;
-    BiNode globalBestNode = {-1, INT_MAX, 0, INT_MAX, INT_MAX, 0, INT_MAX, -1, -1 };
+    int globalBestNodeId = -1;  // Store only the meeting node ID to avoid race conditions
 
     // Logical (unwrapped) bucket numbers for iteration and early stopping
     int global_forward_logicalBucketStart = -1;
@@ -45,6 +45,7 @@ __global__ void initializeBiNodes(BiNode* nodes, int width, int height);
 __global__ void biAStarMultipleBucketsSingleKernel(
     int *grid, int width, int height,    // grid dimensions and obstacle grid
     int startNodeId, int targetNodeId,                   // for forward search, this is the goal; for backward, the start
+    unsigned int minFValue,
     BiNode *nodes,                      // array of BiNodes (both forward and backward fields integrated)
     // Open list arrays for forward search
     int *forward_openListBins, int *forward_binCounts,

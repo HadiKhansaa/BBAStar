@@ -1,6 +1,7 @@
 #include "grid_generation.cuh"
 #include "constants.cuh"
 #include <algorithm>
+#include <sstream>
 
 // Include stb_image_write for PNG output
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -66,6 +67,81 @@ bool loadCompressedGridFromFile(int *&grid, int &width, int &height, const std::
 
     ifs.close();
     std::cout << "Compressed grid loaded from " << filename << std::endl;
+    return true;
+}
+
+bool loadMovingAiMapFromFile(int *&grid, int &width, int &height, const std::string &filename) {
+    std::ifstream ifs(filename);
+    if (!ifs) {
+        std::cerr << "Failed to open map file for reading: " << filename << std::endl;
+        return false;
+    }
+
+    std::string line;
+    bool readingGrid = false;
+    int row = 0;
+    grid = nullptr;
+    width = 0;
+    height = 0;
+
+    while (std::getline(ifs, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        if (!readingGrid) {
+            if (line.rfind("height", 0) == 0) {
+                std::istringstream iss(line);
+                std::string key;
+                iss >> key >> height;
+            } else if (line.rfind("width", 0) == 0) {
+                std::istringstream iss(line);
+                std::string key;
+                iss >> key >> width;
+            } else if (line == "map") {
+                if (width <= 0 || height <= 0) {
+                    std::cerr << "Invalid map dimensions in: " << filename << std::endl;
+                    return false;
+                }
+                grid = (int *)malloc(width * height * sizeof(int));
+                if (!grid) {
+                    std::cerr << "Failed to allocate memory for map grid\n";
+                    return false;
+                }
+                readingGrid = true;
+            }
+            continue;
+        }
+
+        if ((int)line.size() < width) {
+            std::cerr << "Invalid map row width in: " << filename << " at row " << row << std::endl;
+            free(grid);
+            grid = nullptr;
+            return false;
+        }
+
+        // MovingAI maps include several terrain markers. For the benchmark loader we
+        // only need passable versus blocked cells.
+        for (int col = 0; col < width; ++col) {
+            char cell = line[col];
+            bool passable = (cell == '.' || cell == 'G' || cell == 'S');
+            grid[row * width + col] = passable ? PASSABLE : OBSTACLE;
+        }
+
+        ++row;
+        if (row == height) {
+            break;
+        }
+    }
+
+    if (!grid || row != height) {
+        std::cerr << "Map grid data incomplete in: " << filename << std::endl;
+        free(grid);
+        grid = nullptr;
+        return false;
+    }
+
+    std::cout << "MovingAI map loaded from " << filename << std::endl;
     return true;
 }
 
@@ -186,14 +262,8 @@ void createConcentratedObstacles(int* grid, int n) {
             // Calculate distance from the center
             double distance = distanceFromCenter(x, y, n);
 
-            // Probability of obstacle increases as we move towards the center
-            // Here, the closer to the center, the higher the chance of obstacle
+            // Probability of an obstacle increases as we move toward the center.
             double probability = (1.0 - (distance / maxDistance));
-
-            // double probability = (distance / maxDistance)/2;
-
-
-            // Use the probability to decide if the cell should be an obstacle (0) or open (1)
             if (static_cast<double>(rand()) / RAND_MAX < probability) {
                 grid[index(x, y, n)] = OBSTACLE;  // Blocked cell (obstacle)
             } else {
@@ -330,9 +400,7 @@ void generatePPMImage(const int *grid, int width, int height, const int *path, i
     std::cout << "Image saved to " << filename << std::endl;
 }
 
-// visualizeAStarPathOnGrid with:
-// - thick red path (output-space dilation)
-// - start/end as big blue dots (8x8 by default)
+// Render the path to a bounded PNG so very large maps remain viewable in the demo.
 void visualizeAStarPathOnGrid(const int *grid, int width, int height,
                               const int *path, int pathLength,
                               const int *expandedNodes, int expandedLength,
@@ -392,7 +460,8 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
         return true;
     };
 
-    // Base render (same logic as yours)
+    // Each output pixel summarizes a block of source cells. Path pixels take
+    // precedence, then expanded cells, then the average obstacle/free color.
     for (int by = 0; by < outHeight; ++by) {
         for (int bx = 0; bx < outWidth; ++bx) {
             bool redFound    = false;
@@ -411,7 +480,7 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
                     unsigned char r, g, b;
 
                     if (isInPath[idx]) { r = 255; g =   0; b =   0; redFound = true; }
-                    else if (isExpanded[idx]) { r = 255; g = 165; b =   0; orangeFound = false; }
+                    else if (isExpanded[idx]) { r = 255; g = 165; b =   0; orangeFound = true; }
                     else if (grid[idx] == 1) { r = g = b = 0; }
                     else { r = g = b = 255; }
 
@@ -432,9 +501,8 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
         }
     }
 
-    // --- Make the red path thicker (output-space dilation) ---
-    // radius=1 => ~3px thick, radius=2 => ~5px thick
-    const int pathRadius = 1; // change to 2 if you want thicker than ~3px
+    // Dilate the final path slightly so it remains visible after downsampling.
+    const int pathRadius = 1;
     std::vector<unsigned char> redMask(outWidth * outHeight, 0);
 
     // Build an output mask from original path nodes
@@ -466,10 +534,10 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
         }
     }
 
-    // --- Draw start/end as big blue "dots" (8x8 squares) ---
-    const int dotSize = 32;      // 8x8
-    const int halfA   = dotSize / 2;     // 4
-    const int halfB   = dotSize - halfA; // 4 (so even sizes stay 8 total)
+    // Highlight the endpoints after drawing the path so they stay visible.
+    const int dotSize = 32;
+    const int halfA   = dotSize / 2;
+    const int halfB   = dotSize - halfA;
 
     auto drawBlueDot = [&](int nodeId) {
         int cx, cy;
@@ -491,58 +559,3 @@ void visualizeAStarPathOnGrid(const int *grid, int width, int height,
         std::cerr << "Failed to save image to " << filename << "\n";
     }
 }
-
-
-// int main(int argc, char** argv)
-// {
-//      // Grid dimensions and initialization code (same as before)
-//     int width = 1001;  // Adjusted for demonstration
-//     int height = 1001;
-//     float obstacleRate = 0.2; // Default obstacle rate (percentage)
-//     std::string gridType = "";
-//     std::string output_path = "";
-
-//     if (argc == 5)
-//     {
-//         height = atoi(argv[1]);
-//         width = atoi(argv[1]);
-//         obstacleRate = atoi(argv[2])/100.0;
-//         gridType = argv[3];
-//         output_path = argv[4];
-//     }
-//     else
-//     {
-//         std::cout<<"USAGE: ./urProgram [N] [ObstacleRate] [gridType] [outputPath]\n";
-//         return EXIT_FAILURE;
-//     }
-
-//     int gridSize = width * height;
-
-//     // Start and goal nodes
-//     int startNodeId = 0;                 // Top-left corner
-//     int goalNodeId = width * height - 1; // Bottom-right corner
-
-//     // Allocate and initialize grid on host
-//     int *h_grid = (int *)malloc(gridSize * sizeof(int));
-//     if (h_grid == NULL) {
-//         fprintf(stderr, "Failed to allocate host memory for h_grid\n");
-//         exit(EXIT_FAILURE);
-//     }
-
-//     // Apply obstacles
-//     if(gridType == "random")
-//         applyRandomObstacles(h_grid, width, height, obstacleRate);
-//     else if(gridType == "maze")
-//         createMaze(h_grid, height);
-//     else if(gridType == "blockCenter")
-//         createConcentratedObstacles(h_grid, height);
-//     else if(gridType == "zigzag")
-//         createZigzagPattern(h_grid, width, height);
-//     else if (gridType == "rectangle")
-//         applyRandomRectangleObstacles(h_grid, width, height, obstacleRate);
-//     else
-//         applyRandomObstacles(h_grid, width, height, obstacleRate);
-    
-//     // save the grid to PATH
-//     saveCompressedGridToFile(h_grid, width, height, output_path);
-// }

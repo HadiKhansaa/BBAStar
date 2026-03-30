@@ -28,6 +28,7 @@ __constant__ int2 NEIGHBOR_OFFSETS[8] = {
 __global__ void biAStarMultipleBucketsSingleKernel(
     int *grid, int width, int height,    // grid dimensions and obstacle grid
     int startNodeId, int targetNodeId,                   // for forward search, this is the goal; for backward, the start
+    unsigned int minFValue,
     BiNode *nodes,                      // array of BiNodes (both forward and backward fields integrated)
     // Open list arrays for forward search
     int *forward_openListBins, int *forward_binCounts,
@@ -45,14 +46,12 @@ __global__ void biAStarMultipleBucketsSingleKernel(
     int *openListBinsPtr; // to be determined for each thread
     int *expansionBuffersPtr; // to be determined for each thread
     int *expansionCountsPtr; // to be determined for each thread
-    // int gridSize = width * height; // total number of nodes in the grid
 
     // Cooperative groups for grid-wide synchronization.
     cg::grid_group gridGroup = cg::this_grid();
 
     // Linear thread ID across the entire grid.
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int totalThreads = gridGroup.size();   
     // Main bidirectional A* loop.
     while (!state->d_done_forward || !state->d_done_backward)
     {
@@ -73,8 +72,6 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             if (prevLogical < 0)
                 prevLogical = 0;
 
-            // int localStart = -1;
-            // int localEnd   = -1;
             int localTotal = 0;
             int logicalStart = -1;
 
@@ -128,67 +125,23 @@ __global__ void biAStarMultipleBucketsSingleKernel(
             }
 
             // early stopping when the min f in this direction cannot beat globalBestCost
-            unsigned int minFBase = DIAGONAL_COST * (width - 1);
-
             if (isForward &&
                 state->global_forward_logicalBucketStart != -1 &&
-                state->global_forward_logicalBucketStart * BUCKET_F_RANGE + minFBase >= state->globalBestCost)
+                state->global_forward_logicalBucketStart * BUCKET_F_RANGE + minFValue >= state->globalBestCost)
             {
                 state->d_done_forward = true;
             }
 
             if (!isForward &&
                 state->global_backward_logicalBucketStart != -1 &&
-                state->global_backward_logicalBucketStart * BUCKET_F_RANGE + minFBase >= state->globalBestCost)
+                state->global_backward_logicalBucketStart * BUCKET_F_RANGE + minFValue >= state->globalBestCost)
             {
                 state->d_done_backward = true;
             }
 
-            // debugging
-// #ifdef DEBUG
-            // if(threadIdx.x == 0)
-            // {
-            //     printf("current best cost: %d\n", state->globalBestCost);
-
-            //     printf("Active elements forward: %d\n", localTotal);
-            //     printf("Bucket range forward: %d - %d\n\n", state->global_forward_logicalBucketStart, state->global_forward_bucketCount);
-
-            // }
-            // if(threadIdx.x == 1)
-            // {
-            //     printf("Active elements backward: %d\n", localTotal);
-            //     printf("Bucket range backward: %d - %d\n\n", state->global_backward_logicalBucketStart, state->global_backward_bucketCount);
-            // }
-
-            // wait(1000000);
-// #endif
         }
 
-        // clear expansion count buffers (only for active range)
-        // if(blockIdx.x == 0)
-        // {
-        //     for(int i = threadIdx.x; i < MAX_BINS ; i += blockDim.x) {
-        //         forward_expansionCounts[i] = 0;
-        //         backward_expansionCounts[i] = 0;
-        //     }
-        // }
-
-        // if (blockIdx.x == 0 && threadIdx.x == 0) {
-        //     if (state->global_backward_logicalBucketStart != -1 && state->global_backward_logicalBucketStart != -1 && state->globalBestCost != INT_MAX) {
-        //         unsigned int minFBase = DIAGONAL_COST * (width - 1);
-        //         unsigned int minForward = state->global_forward_logicalBucketStart * BUCKET_F_RANGE + minFBase;
-        //         unsigned int minBackward = state->global_backward_logicalBucketStart * BUCKET_F_RANGE + minFBase;
-        //         if ((minForward + minBackward) >= state->globalBestCost * 1.9) {
-        //             state->d_done_forward = true;
-        //             state->d_done_backward = true;
-        //         }
-        //     }
-        // }
-
         gridGroup.sync(); // sync all blocks
-
-        // if(state->d_done_forward || state->d_done_backward)
-        //     printf("%d %d\n", state->d_done_forward, state->d_done_backward);
 
         if (state->d_done_forward && state->d_done_backward)
             break;
@@ -234,10 +187,8 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         if (threadAssignment == BACKWARD && state->d_done_backward) {
             threadAssignment = UNASSIGNNED;
         }
-        // assert(state->global_forward_totalElementsInRange * MAX_NEIGHBORS +
-        //     state->global_backward_totalElementsInRange * MAX_NEIGHBORS <= TOTAL_THREADS);
-
-        // decide thread <-> direction
+        // Threads are statically partitioned by direction, then assigned to nodes
+        // within the current bucket window one neighbor at a time.
         int logicalBucketStart = threadAssignment == FORWARD ? state->global_forward_logicalBucketStart : state->global_backward_logicalBucketStart;
         int bucketCount = threadAssignment == FORWARD ? state->global_forward_bucketCount : state->global_backward_bucketCount;
 
@@ -265,18 +216,15 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         }
         
         if (assignedBucket != -1 && threadAssignment != UNASSIGNNED) {
-            // Count this expansion.
-
             int nodeIndex     = threadPosition / MAX_NEIGHBORS;  
             int neighborIndex = threadPosition % MAX_NEIGHBORS;
-
-            // atomicAdd(totalExpandedNodes, 1);
             
             int currentNodeId = openListBinsPtr[assignedBucket * MAX_BIN_SIZE + nodeIndex];
             BiNode& currentNode = nodes[currentNodeId];
 
-            // check if the current node is valid i.e. in the correct bucket
-            unsigned int minFValue = DIAGONAL_COST * (width - 1);
+            // Nodes may remain in the physical bucket array after a better path moved
+            // them elsewhere. The recorded open-list address guards against expanding
+            // stale entries.
             unsigned int appropriateBucket = (threadAssignment == FORWARD ? (currentNode.f_forward - minFValue)/BUCKET_F_RANGE
              : (currentNode.f_backward - minFValue)/BUCKET_F_RANGE) % MAX_BINS;
 
@@ -324,9 +272,7 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                             }
                         }
                         if ((oldG!=UINT32_MAX) && (tentativeG < oldG)) {
-                            // __threadfence(); // Ensure the update is visible to all threads before proceeding.
-
-                            expandedNodes[atomicAdd(totalExpandedNodes, 1)] = neighborId;
+                            atomicAdd(totalExpandedNodes, 1);
 
                             // Update neighbor's fields accordingly.
                             if (threadAssignment == FORWARD) {
@@ -352,61 +298,54 @@ __global__ void biAStarMultipleBucketsSingleKernel(
                                 unsigned int candidateCost = nodes[neighborId].g_forward + nodes[neighborId].g_backward;
                                 unsigned int oldCost = atomicMin(&state->globalBestCost, candidateCost);
                                 if(candidateCost < oldCost)
-                                    state->globalBestNode = nodes[neighborId]; // needs changing
+                                    atomicExch(&state->globalBestNodeId, neighborId);  // Atomically store the node ID
                             } 
                             
                             if (threadAssignment == BACKWARD && nodes[neighborId].g_forward != INT_MAX) {
                                 unsigned int candidateCost = nodes[neighborId].g_backward + nodes[neighborId].g_forward;
                                 unsigned int oldCost = atomicMin(&state->globalBestCost, candidateCost);
                                 if(candidateCost < oldCost)    
-                                    state->globalBestNode = nodes[neighborId]; // needs changing
+                                    atomicExch(&state->globalBestNodeId, neighborId);  // Atomically store the node ID
                             }
 
-                            // don't expand if we found a local path
-                            // don't expand the node of the opposite search
                             if((threadAssignment == FORWARD && tentativeG == nodes[neighborId].g_forward) || (threadAssignment == BACKWARD && tentativeG == nodes[neighborId].g_backward))
                             {
-                                // EXPAND
-                                // Compute the bin for the neighbor based on its updated f-value.
+                                // Newly improved nodes either join the current iteration's
+                                // expansion buffer or a future open-list bucket.
                                 unsigned int newF = threadAssignment == FORWARD ? nodes[neighborId].f_forward : nodes[neighborId].f_backward;
-                                unsigned int binForNghbr = binForNode(newF, width);
-                                // binForNode already returns modulo MAX_BINS, so it's always < MAX_BINS
+                                unsigned int binForNghbr = binForNode(newF, minFValue);
                                 
                                 if(newF < state->globalBestCost) // only expand if the f-value is less than the global best cost
                                 {
                                     // Check if this bin is in the current active range
-                                    unsigned int minFValue = DIAGONAL_COST * (width - 1);
                                     int logicalBin = (newF - minFValue) / BUCKET_F_RANGE;
                                     int logicalStart = threadAssignment == FORWARD ? state->global_forward_logicalBucketStart : state->global_backward_logicalBucketStart;
                                     int bucketCount = threadAssignment == FORWARD ? state->global_forward_bucketCount : state->global_backward_bucketCount;
-                                    bool inRange = (logicalBin >= logicalStart && logicalBin < logicalStart + bucketCount);
                                     
-                                    // Only allow writes to future buckets within a safe range (not wrapping around to old buckets)
+                                    // Only allow insertion within the currently valid logical
+                                    // window to avoid circular-buffer collisions after wraparound.
                                     bool isSafeForWrite = (logicalBin >= logicalStart && logicalBin < logicalStart + MAX_BINS);
                                     
-                                    if (inRange) {
-                                        unsigned int pos = atomicAdd(&expansionCountsPtr[binForNghbr], 1);
-
-                                        assert(pos < MAX_BIN_SIZE);
-
-                                        unsigned int offset = binForNghbr * MAX_BIN_SIZE + pos;
-                                        expansionBuffersPtr[offset] = neighborId;
-                                        // threadAssignment == FORWARD ? nodes[neighborId].openListAddress_forward = offset : nodes[neighborId].openListAddress_backward = offset;
-
-                                        // printf("Adding neighbor %d to expansion buffer %d\n", neighborId, binForNghbr);
-                                    } else if (isSafeForWrite) {
-                                        // For buckets outside active range: use CAS to safely claim/clear before first write
-                                        // This prevents collision when physical bucket wraps from old logical bucket
-                                        unsigned int pos = atomicAdd(&binCountsPtr[binForNghbr], 1);
+                                    if (isSafeForWrite) {
+                                        // Check if in active range (goes to expansion buffer) or future (goes to openList)
+                                        bool inActiveRange = (logicalBin < logicalStart + bucketCount);
                                         
-                                        // If this is the first node in this bucket (pos==0), it was just cleared from 0->1
-                                        // which is safe. If pos>0, bucket is already in use for this logical bucket.
-                                        assert(pos < MAX_BIN_SIZE);
-                                        unsigned int offset = binForNghbr * MAX_BIN_SIZE + pos;
-                                        openListBinsPtr[offset] = neighborId;
-                                        threadAssignment == FORWARD ? nodes[neighborId].openListAddress_forward = offset : nodes[neighborId].openListAddress_backward = offset;
+                                        if (inActiveRange) {
+                                            // Active range - use expansion buffer
+                                            unsigned int pos = atomicAdd(&expansionCountsPtr[binForNghbr], 1);
+                                            assert(pos < MAX_BIN_SIZE);
+                                            unsigned int offset = binForNghbr * MAX_BIN_SIZE + pos;
+                                            expansionBuffersPtr[offset] = neighborId;
+                                        } else {
+                                            // Future bucket - add directly to open list
+                                            unsigned int pos = atomicAdd(&binCountsPtr[binForNghbr], 1);
+                                            assert(pos < MAX_BIN_SIZE);
+                                            unsigned int offset = binForNghbr * MAX_BIN_SIZE + pos;
+                                            openListBinsPtr[offset] = neighborId;
+                                            threadAssignment == FORWARD ? nodes[neighborId].openListAddress_forward = offset : nodes[neighborId].openListAddress_backward = offset;
+                                        }
                                     }
-                                    // else: discard the node (would cause collision)
+                                    // else: node outside safe range (past or too far ahead), will be re-discovered later
                                 }
                             }
                         }
@@ -581,12 +520,12 @@ __global__ void biAStarMultipleBucketsSingleKernel(
         } else {
             *found = true;
             printf("Path found with cost: %d\n", state->globalBestCost/SCALE_FACTOR);
-            printf("Meeting node: (%d, %d)\n", state->globalBestNode.id/width, state->globalBestNode.id%width);
+            printf("Meeting node: (%d, %d)\n", state->globalBestNodeId/width, state->globalBestNodeId%width);
         }
     }
 
     // found reconstruct path
     if(*found && blockIdx.x == 0 && (threadIdx.x == 0 || threadIdx.x == 1))
-        constractBidirectionalPath(startNodeId, targetNodeId, state->globalBestNode, path, pathLength, nodes);
+        constractBidirectionalPath(startNodeId, targetNodeId, state->globalBestNodeId, path, pathLength, nodes);
     // end of kernel
 }

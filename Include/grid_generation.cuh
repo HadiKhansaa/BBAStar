@@ -9,6 +9,8 @@ void saveCompressedGridToFile(const int *grid, int width, int height, const std:
 
 bool loadCompressedGridFromFile(int *&grid, int &width, int &height, const std::string &filename);
 
+bool loadMovingAiMapFromFile(int *&grid, int &width, int &height, const std::string &filename);
+
 void divide(int* grid, int startX, int startY, int width, int height, bool horizontal, int n);
 
 void createMaze(int* grid, int n);
