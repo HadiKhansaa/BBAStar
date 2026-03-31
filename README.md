@@ -1,6 +1,6 @@
 # Bucket_Astar
 
-Implementation accompanying the paper **Parallel Bidirectional A* Search for GPU-Accelerated Pathfinding**. The repository contains a CUDA implementation of bidirectional A* for grid pathfinding using bucketed open lists, plus a small bundled sample so researchers can run the code immediately.
+Implementation accompanying the paper **Parallel Bidirectional A* Search for GPU-Accelerated Pathfinding**. The repository contains CUDA implementations of both bidirectional and unidirectional bucket-based A* for grid pathfinding, plus a shell-based demo that runs a small experiment suite and summarizes the results.
 
 ## Paper
 
@@ -10,11 +10,12 @@ Implementation accompanying the paper **Parallel Bidirectional A* Search for GPU
 
 ## Repository Layout
 
-- `src/`: CUDA implementation and the main executable entrypoint.
-- `include/`: CUDA headers and shared constants.
+- `src/`: CUDA implementations and executable entrypoints.
+- `include/`: CUDA headers, shared constants, and implementation-specific types.
 - `CPU/`: reference CPU baselines kept for comparison.
 - `scripts/`: benchmark utilities and legacy exploratory helpers.
 - `data/maps/`: bundled sample MovingAI map and scenario used by the demo.
+- `data/generated/`: bundled compressed-grid sample for procedural/generated-grid testing.
 
 ## Requirements
 
@@ -22,7 +23,7 @@ Implementation accompanying the paper **Parallel Bidirectional A* Search for GPU
 - CUDA Toolkit with `nvcc` in `PATH`
 - MSVC with `cl.exe` in `PATH`
 - GNU Make-compatible `make`
-- Python 3 for `demo.py`
+- Git Bash or another Bash-compatible shell for `demo.sh`
 
 The Makefile currently targets `sm_89` by default. If your GPU uses a different architecture, override it when building:
 
@@ -44,17 +45,34 @@ This produces:
 bin/astar_bidirectional.exe
 ```
 
+To build the unidirectional CUDA implementation:
+
+```powershell
+make unidirectional
+```
+
+This produces:
+
+```text
+bin/astar_unidirectional.exe
+```
+
 Other supported targets:
 
 ```powershell
 make debug
+make unidirectional_debug
 make clean
 make help
 ```
 
 ## Run The Demo
 
-The recommended entrypoint is the top-level demo script. It uses the bundled `arena` sample and the first scenario from `arena.map.scen`.
+The recommended entrypoint is the top-level shell demo. It runs:
+
+- one bundled MovingAI `.map` reference case
+- multiple larger procedural grid cases across several grid types
+- a summary table with runtime, expanded nodes, path cost, and aggregate statistics
 
 1. Build the CUDA binary.
 
@@ -64,25 +82,47 @@ The recommended entrypoint is the top-level demo script. It uses the bundled `ar
 
 2. Run the demo.
 
-   ```powershell
-   python demo.py
+   From Git Bash:
+
+   ```bash
+   ./demo.sh
    ```
 
-3. Optional: skip image generation for a faster smoke test.
+   From PowerShell with Git Bash installed in the default location:
 
    ```powershell
-   python demo.py --no-image
+   & "C:\Program Files\Git\bin\bash.exe" ./demo.sh
+   ```
+
+   To run the shell demo with the unidirectional implementation, start with a smaller procedural case set:
+
+   ```bash
+   ./demo.sh --binary bin/astar_unidirectional.exe --cases 64:rectangle,64:zigzag,128:rectangle
+   ```
+
+3. Optional: increase repetitions to stabilize the summary statistics.
+
+   ```bash
+   ./demo.sh --repeats 3
+   ```
+
+4. Optional: customize the procedural cases.
+
+   ```bash
+   ./demo.sh --cases 512:random,512:maze,1024:rectangle --repeats 2
    ```
 
 On success the script prints:
 
-- the exact executable command it ran
-- pathfinding status
-- kernel runtime
-- expanded node count
-- path cost
+- every command it ran
+- a detailed per-run results table
+- summary statistics grouped by grid type
+- summary statistics grouped by grid size
+- an overall summary across the whole experiment suite
 
-If image generation is enabled, the path visualization is written to `data/AstarPath.png`.
+The raw results are also saved as a TSV file under `benchmark_results/`. By default the script removes `data/AstarPath.png` after each run to keep the repository clean; use `--keep-image` if you want to inspect the last rendered path.
+
+The default larger procedural suite is tuned for the bidirectional CUDA binary. The extracted unidirectional kernel is still useful for comparison, but in practice it is more reliable on smaller procedural cases.
 
 ## Direct CLI Usage
 
@@ -94,10 +134,17 @@ Bundled sample map:
 bin\astar_bidirectional.exe --map data\maps\arena.map --start-x 19 --start-y 26 --goal-x 19 --goal-y 29
 ```
 
+The unidirectional binary supports the same `.map` benchmark interface:
+
+```powershell
+bin\astar_unidirectional.exe --map data\maps\arena.map --start-x 19 --start-y 26 --goal-x 19 --goal-y 29 --no-image
+```
+
 Procedural grids:
 
 ```powershell
 bin\astar_bidirectional.exe [size [obstacle_rate [grid_type [compressed_grid_path]]]]
+bin\astar_unidirectional.exe [size [obstacle_rate [grid_type [compressed_grid_path]]]]
 ```
 
 Supported `grid_type` values:
@@ -108,12 +155,32 @@ Supported `grid_type` values:
 - `zigzag`
 - `rectangle`
 
+Bundled generated-grid sample with the bidirectional binary:
+
+```powershell
+bin\astar_bidirectional.exe 64 20 rectangle data\generated\demo_rectangle_64.bin
+```
+
+The same bundled sample also works with the unidirectional binary:
+
+```powershell
+bin\astar_unidirectional.exe 64 20 rectangle data\generated\demo_rectangle_64.bin
+```
+
+Both binaries accept the same positional compressed-grid path, so you can compare them directly on the same generated sample.
+
 ## Benchmarks
 
-The repository intentionally ships only a minimal sample dataset for the demo path. To run larger experiments, place additional MovingAI `.map` and `.map.scen` files under `data/maps/` and use:
+The repository intentionally ships only minimal bundled samples. To run larger `.map` experiments, place additional MovingAI `.map` and `.map.scen` files under `data/maps/` and use:
 
 ```powershell
 python scripts\run_maps_benchmark.py --binary bin\astar_bidirectional.exe --maps-dir data\maps --limit-scenarios 10
+```
+
+To benchmark the unidirectional binary instead:
+
+```powershell
+python scripts\run_maps_benchmark.py --binary bin\astar_unidirectional.exe --maps-dir data\maps --limit-scenarios 10
 ```
 
 Results are written to `benchmark_results/`.
@@ -121,4 +188,5 @@ Results are written to `benchmark_results/`.
 ## Notes
 
 - The CUDA implementation relies on cooperative groups and grid-wide synchronization.
-- The CPU sources are provided as reference baselines, but the primary supported workflow in this release is the CUDA path above.
+- The CPU sources are provided as reference baselines, but the primary supported workflows in this release are the two CUDA binaries above.
+- `demo.sh` targets Bash. On Windows, Git Bash works well and can still launch the compiled `.exe` binaries directly.
