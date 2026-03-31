@@ -1,0 +1,19 @@
+/bin/
+/benchmark_results/
+/CPU/*.exe
+/src/*.exe
+/data/AstarPath.png
+/data/generated/*
+/old_bucket_astar/
+!/data/generated/demo_rectangle_64.bin
+/data/generated maps/
+/data/maps/*
+!/data/maps/arena.map
+!/data/maps/arena.map.scen
+/.claude/
+/.vscode/
+*.exp
+*.lib
+*.obj
+*.pdb
+*.ncu-rep
