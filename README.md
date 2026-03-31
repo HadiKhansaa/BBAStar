@@ -158,7 +158,7 @@ Supported `grid_type` values:
 The paper evaluates several synthetic grid families beyond the bundled sample. The figure below summarizes the main obstacle patterns used throughout the experiments and the kinds of paths the implementation reconstructs on them.
 
 <p align="center">
-  <img src="docs/figures/grid-types-overview.svg" alt="Representative random obstacles, random rectangle, blocked center, and maze grid types with example paths." width="760">
+  <img src="docs/figures/grid-types-overview.png" alt="Representative random obstacles, random rectangle, blocked center, and maze grid types with example paths." width="760">
 </p>
 
 <p align="center"><em>Representative procedural grid families used in the paper: random obstacles, random rectangles, blocked-center fields, and maze-like layouts.</em></p>
@@ -204,7 +204,7 @@ At a high level, the unidirectional kernel:
 Both variants depend on cooperative groups and grid-wide synchronization. That synchronization lets bucket selection, parallel expansion, frontier copying, and stopping logic happen inside one coordinated GPU execution model rather than through a long sequence of host-driven priority-queue operations.
 
 <p align="center">
-  <img src="docs/figures/bucket-frontier-architecture.svg" alt="Bucketed frontier architecture showing open-list buckets, thread assignments, and auxiliary buffers." width="760">
+  <img src="docs/figures/bucket-frontier-architecture.png" alt="Bucketed frontier architecture showing open-list buckets, thread assignments, and auxiliary buffers." width="760">
 </p>
 
 <p align="center"><em>Bucketed frontier management is the core organizing idea: threads expand nodes from the current bucket window while newly improved nodes are staged in auxiliary buffers or inserted into later buckets.</em></p>
@@ -226,7 +226,7 @@ python scripts\run_maps_benchmark.py --binary bin\astar_unidirectional.exe --map
 The benchmark discussion in the paper emphasizes that the bucketed bidirectional GPU search becomes especially effective as the grids grow larger and the obstacle structure becomes more irregular. The figure below summarizes that reported trend at a glance.
 
 <p align="center">
-  <img src="docs/figures/speedup-overview.svg" alt="Illustrative speedup overview across grid families, showing the bidirectional bucket-based GPU implementation outperforming the compared baselines." width="920">
+  <img src="docs/figures/speedup-overview.png" alt="Illustrative speedup overview across grid families, showing the bidirectional bucket-based GPU implementation outperforming the compared baselines." width="920">
 </p>
 
 <p align="center"><em>Illustrative benchmark summary: the reported speedups grow with grid complexity, and BBA* delivers the strongest gains among the compared GPU baselines.</em></p>
