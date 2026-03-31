@@ -1,4 +1,4 @@
-# Bucket_Astar
+# Parallel Bidirectional A* Search for GPU-Accelerated Pathfinding
 
 Implementation accompanying the paper **Parallel Bidirectional A* Search for GPU-Accelerated Pathfinding**. The repository contains CUDA implementations of both bidirectional and unidirectional bucket-based A* for grid pathfinding, plus a shell-based demo that runs a small experiment suite and summarizes the results.
 
@@ -155,6 +155,14 @@ Supported `grid_type` values:
 - `zigzag`
 - `rectangle`
 
+The paper evaluates several synthetic grid families beyond the bundled sample. The figure below summarizes the main obstacle patterns used throughout the experiments and the kinds of paths the implementation reconstructs on them.
+
+<p align="center">
+  <img src="docs/figures/grid-types-overview.svg" alt="Representative random obstacles, random rectangle, blocked center, and maze grid types with example paths." width="760">
+</p>
+
+<p align="center"><em>Representative procedural grid families used in the paper: random obstacles, random rectangles, blocked-center fields, and maze-like layouts.</em></p>
+
 Bundled generated-grid sample with the bidirectional binary:
 
 ```powershell
@@ -169,6 +177,38 @@ bin\astar_unidirectional.exe 64 20 rectangle data\generated\demo_rectangle_64.bi
 
 Both binaries accept the same positional compressed-grid path, so you can compare them directly on the same generated sample.
 
+## Key Data Structures and Algorithm
+
+At the lowest level, both CUDA implementations operate on a linearized 2D occupancy grid. Cells use the shared `PASSABLE = 0` and `OBSTACLE = 1` convention, movement is 8-connected, and costs are encoded as scaled integers so straight and diagonal relaxations can be handled with atomic integer updates (`SCALE_FACTOR` and `DIAGONAL_COST`).
+
+The bidirectional path keeps a `BiNode` record for every cell. Each `BiNode` stores forward and backward `g`, `h`, and `f` values, separate parent pointers, and open-list addresses so the kernel can distinguish valid bucket entries from stale ones. Cross-block coordination is handled by `BidirectionalState`, which tracks the current logical bucket windows for the forward and backward searches, whether either direction has finished, and the globally best meeting cost and meeting node discovered so far.
+
+Instead of a serial heap, the bidirectional kernel organizes the frontier as two circular bucketed open lists, one per direction, plus per-direction expansion buffers. A typical iteration:
+
+- initializes or updates the active forward and backward bucket ranges
+- assigns GPU threads to node-neighbor expansions inside those bucket windows
+- relaxes neighbors atomically on the shared node array
+- checks for forward/backward meeting opportunities and updates the global best path cost
+- copies newly improved nodes from the expansion buffers back into the bucketed open lists
+- reconstructs the final route by stitching together the start-to-meeting and meeting-to-goal parent chains
+
+The unidirectional path uses a simpler `Node` structure with `g`, `h`, `f`, and `parent`. Its frontier is still bucketed, but it also keeps a bitmask over non-empty buckets so the kernel can find the next active range quickly. Nodes whose new `f` values remain inside the current active bucket window are staged in shared memory first; nodes that fall outside that window are inserted directly into later buckets.
+
+At a high level, the unidirectional kernel:
+
+- selects the next active bucket range from the bitmask-backed frontier
+- expands nodes in parallel across that range
+- relaxes neighbors and routes them either to the shared staging window or to future buckets
+- stops once the goal has been reached and reconstructs the parent chain back to the start
+
+Both variants depend on cooperative groups and grid-wide synchronization. That synchronization lets bucket selection, parallel expansion, frontier copying, and stopping logic happen inside one coordinated GPU execution model rather than through a long sequence of host-driven priority-queue operations.
+
+<p align="center">
+  <img src="docs/figures/bucket-frontier-architecture.svg" alt="Bucketed frontier architecture showing open-list buckets, thread assignments, and auxiliary buffers." width="760">
+</p>
+
+<p align="center"><em>Bucketed frontier management is the core organizing idea: threads expand nodes from the current bucket window while newly improved nodes are staged in auxiliary buffers or inserted into later buckets.</em></p>
+
 ## Benchmarks
 
 The repository intentionally ships only minimal bundled samples. To run larger `.map` experiments, place additional MovingAI `.map` and `.map.scen` files under `data/maps/` and use:
@@ -182,6 +222,14 @@ To benchmark the unidirectional binary instead:
 ```powershell
 python scripts\run_maps_benchmark.py --binary bin\astar_unidirectional.exe --maps-dir data\maps --limit-scenarios 10
 ```
+
+The benchmark discussion in the paper emphasizes that the bucketed bidirectional GPU search becomes especially effective as the grids grow larger and the obstacle structure becomes more irregular. The figure below summarizes that reported trend at a glance.
+
+<p align="center">
+  <img src="docs/figures/speedup-overview.svg" alt="Illustrative speedup overview across grid families, showing the bidirectional bucket-based GPU implementation outperforming the compared baselines." width="920">
+</p>
+
+<p align="center"><em>Illustrative benchmark summary: the reported speedups grow with grid complexity, and BBA* delivers the strongest gains among the compared GPU baselines.</em></p>
 
 Results are written to `benchmark_results/`.
 
