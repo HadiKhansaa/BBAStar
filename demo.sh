@@ -12,7 +12,7 @@ BLUE=$'\033[34m'
 RESET=$'\033[0m'
 PURPLE=$'\033[35m'
 
-BINARY="bin/astar_bidirectional.exe"
+BINARY="bin/astar_bidirectional"
 OBSTACLE_RATE=20
 REPEATS=1
 SCENARIO_INDEX=0
@@ -30,7 +30,7 @@ Usage: ./demo.sh [options]
 Run a small end-to-end experiment suite and summarize the results.
 
 Options:
-  --binary PATH          CUDA executable to run. Default: bin/astar_bidirectional.exe
+  --binary PATH          CUDA executable to run. Default: bin/astar_bidirectional
   --obstacle-rate N      Obstacle rate for procedural grids. Default: 20
   --repeats N            Repeats per procedural case. Default: 1
   --cases LIST           Comma-separated size:type cases.

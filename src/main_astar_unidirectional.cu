@@ -32,8 +32,8 @@ enum class CliParseResult {
 static void printUsage() {
     std::cout
         << "Usage:\n"
-        << "  astar_unidirectional.exe [size [obstacle_rate [grid_type [compressed_grid_path]]]]\n"
-        << "  astar_unidirectional.exe --map <map_path> --start-x <x> --start-y <y> "
+        << "  astar_unidirectional [size [obstacle_rate [grid_type [compressed_grid_path]]]]\n"
+        << "  astar_unidirectional --map <map_path> --start-x <x> --start-y <y> "
            "--goal-x <x> --goal-y <y> [--no-image]\n";
 }
 

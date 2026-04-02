@@ -1,6 +1,6 @@
 # Parallel Bidirectional A* Search for GPU-Accelerated Pathfinding
 
-Implementation accompanying the paper **Parallel Bidirectional A* Search for GPU-Accelerated Pathfinding**. The repository contains CUDA implementations of both bidirectional and unidirectional bucket-based A* for grid pathfinding, plus a shell-based demo that runs a small experiment suite and summarizes the results.
+Linux/GCC testing branch for the implementation accompanying the paper **Parallel Bidirectional A* Search for GPU-Accelerated Pathfinding**. This branch keeps the repository workflow Linux-first for CUDA builds with `gcc`/`g++` as the host compiler. The `main` branch remains unchanged and continues to be the original Windows/MSVC-oriented branch.
 
 ## Paper
 
@@ -11,7 +11,7 @@ Implementation accompanying the paper **Parallel Bidirectional A* Search for GPU
 ## Repository Layout
 
 - `src/`: CUDA implementations and executable entrypoints.
-- `include/`: CUDA headers, shared constants, and implementation-specific types.
+- `Include/`: CUDA headers, shared constants, and implementation-specific types.
 - `CPU/`: reference CPU baselines kept for comparison.
 - `scripts/`: benchmark utilities and legacy exploratory helpers.
 - `data/maps/`: bundled sample MovingAI map and scenario used by the demo.
@@ -19,47 +19,54 @@ Implementation accompanying the paper **Parallel Bidirectional A* Search for GPU
 
 ## Requirements
 
-- Windows with an NVIDIA GPU that supports cooperative kernel launch
+- Linux with an NVIDIA GPU that supports cooperative kernel launch
 - CUDA Toolkit with `nvcc` in `PATH`
-- MSVC with `cl.exe` in `PATH`
-- GNU Make-compatible `make`
-- Git Bash or another Bash-compatible shell for `demo.sh`
+- GCC/G++ available in `PATH`
+- GNU Make
+- Bash
+- Python 3 for `scripts/run_maps_benchmark.py`
 
-The Makefile currently targets `sm_89` by default. If your GPU uses a different architecture, override it when building:
+The Makefile targets `sm_89` by default. If your GPU uses a different architecture, override it when building:
 
-```powershell
+```bash
 make CUDA_ARCH=sm_86
+```
+
+You can also override the host compiler explicitly:
+
+```bash
+make HOST_COMPILER=g++
 ```
 
 ## Build
 
 From the repository root:
 
-```powershell
+```bash
 make
 ```
 
 This produces:
 
 ```text
-bin/astar_bidirectional.exe
+bin/astar_bidirectional
 ```
 
 To build the unidirectional CUDA implementation:
 
-```powershell
+```bash
 make unidirectional
 ```
 
 This produces:
 
 ```text
-bin/astar_unidirectional.exe
+bin/astar_unidirectional
 ```
 
 Other supported targets:
 
-```powershell
+```bash
 make debug
 make unidirectional_debug
 make clean
@@ -76,41 +83,33 @@ The recommended entrypoint is the top-level shell demo. It runs:
 
 1. Build the CUDA binary.
 
-   ```powershell
-   make
-   ```
+```bash
+make
+```
 
 2. Run the demo.
 
-   From Git Bash:
+```bash
+./demo.sh
+```
 
-   ```bash
-   ./demo.sh
-   ```
+To run the shell demo with the unidirectional implementation, start with a smaller procedural case set:
 
-   From PowerShell with Git Bash installed in the default location:
-
-   ```powershell
-   & "C:\Program Files\Git\bin\bash.exe" ./demo.sh
-   ```
-
-   To run the shell demo with the unidirectional implementation, start with a smaller procedural case set:
-
-   ```bash
-   ./demo.sh --binary bin/astar_unidirectional.exe --cases 64:rectangle,64:zigzag,128:rectangle
-   ```
+```bash
+./demo.sh --binary bin/astar_unidirectional --cases 64:rectangle,64:zigzag,128:rectangle
+```
 
 3. Optional: increase repetitions to stabilize the summary statistics.
 
-   ```bash
-   ./demo.sh --repeats 3
-   ```
+```bash
+./demo.sh --repeats 3
+```
 
 4. Optional: customize the procedural cases.
 
-   ```bash
-   ./demo.sh --cases 512:random,512:maze,1024:rectangle --repeats 2
-   ```
+```bash
+./demo.sh --cases 512:random,512:maze,1024:rectangle --repeats 2
+```
 
 On success the script prints:
 
@@ -126,25 +125,23 @@ The default larger procedural suite is tuned for the bidirectional CUDA binary. 
 
 ## Direct CLI Usage
 
-The executable also supports direct invocation.
-
 Bundled sample map:
 
-```powershell
-bin\astar_bidirectional.exe --map data\maps\arena.map --start-x 19 --start-y 26 --goal-x 19 --goal-y 29
+```bash
+bin/astar_bidirectional --map data/maps/arena.map --start-x 19 --start-y 26 --goal-x 19 --goal-y 29
 ```
 
 The unidirectional binary supports the same `.map` benchmark interface:
 
-```powershell
-bin\astar_unidirectional.exe --map data\maps\arena.map --start-x 19 --start-y 26 --goal-x 19 --goal-y 29 --no-image
+```bash
+bin/astar_unidirectional --map data/maps/arena.map --start-x 19 --start-y 26 --goal-x 19 --goal-y 29 --no-image
 ```
 
 Procedural grids:
 
-```powershell
-bin\astar_bidirectional.exe [size [obstacle_rate [grid_type [compressed_grid_path]]]]
-bin\astar_unidirectional.exe [size [obstacle_rate [grid_type [compressed_grid_path]]]]
+```bash
+bin/astar_bidirectional [size [obstacle_rate [grid_type [compressed_grid_path]]]]
+bin/astar_unidirectional [size [obstacle_rate [grid_type [compressed_grid_path]]]]
 ```
 
 Supported `grid_type` values:
@@ -165,14 +162,14 @@ The paper evaluates several synthetic grid families beyond the bundled sample. T
 
 Bundled generated-grid sample with the bidirectional binary:
 
-```powershell
-bin\astar_bidirectional.exe 64 20 rectangle data\generated\demo_rectangle_64.bin
+```bash
+bin/astar_bidirectional 64 20 rectangle data/generated/demo_rectangle_64.bin
 ```
 
 The same bundled sample also works with the unidirectional binary:
 
-```powershell
-bin\astar_unidirectional.exe 64 20 rectangle data\generated\demo_rectangle_64.bin
+```bash
+bin/astar_unidirectional 64 20 rectangle data/generated/demo_rectangle_64.bin
 ```
 
 Both binaries accept the same positional compressed-grid path, so you can compare them directly on the same generated sample.
@@ -213,14 +210,14 @@ Both variants depend on cooperative groups and grid-wide synchronization. That s
 
 The repository intentionally ships only minimal bundled samples. To run larger `.map` experiments, place additional MovingAI `.map` and `.map.scen` files under `data/maps/` and use:
 
-```powershell
-python scripts\run_maps_benchmark.py --binary bin\astar_bidirectional.exe --maps-dir data\maps --limit-scenarios 10
+```bash
+python3 scripts/run_maps_benchmark.py --binary bin/astar_bidirectional --maps-dir data/maps --limit-scenarios 10
 ```
 
 To benchmark the unidirectional binary instead:
 
-```powershell
-python scripts\run_maps_benchmark.py --binary bin\astar_unidirectional.exe --maps-dir data\maps --limit-scenarios 10
+```bash
+python3 scripts/run_maps_benchmark.py --binary bin/astar_unidirectional --maps-dir data/maps --limit-scenarios 10
 ```
 
 The benchmark discussion in the paper emphasizes that the bucketed bidirectional GPU search becomes especially effective as the grids grow larger and the obstacle structure becomes more irregular. The figure below summarizes that reported trend at a glance.
@@ -235,6 +232,8 @@ Results are written to `benchmark_results/`.
 
 ## Notes
 
+- This `linux` branch is intended for Linux/GCC testing.
+- The `main` branch is intentionally left unchanged.
 - The CUDA implementation relies on cooperative groups and grid-wide synchronization.
-- The CPU sources are provided as reference baselines, but the primary supported workflows in this release are the two CUDA binaries above.
-- `demo.sh` targets Bash. On Windows, Git Bash works well and can still launch the compiled `.exe` binaries directly.
+- The CPU sources are provided as reference baselines, but the primary supported workflows in this branch are the two CUDA binaries above.
+- `demo.sh` targets Bash and the Makefile now assumes a Linux shell environment.

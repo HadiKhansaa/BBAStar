@@ -16,7 +16,7 @@ ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run astar_bidirectional.exe against every .map/.scen pair in data/maps."
+        description="Run astar_bidirectional against every .map/.scen pair in data/maps."
     )
     parser.add_argument(
         "--maps-dir",
@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--binary",
-        default="bin/astar_bidirectional.exe",
+        default="bin/astar_bidirectional",
         help="Path to astar_bidirectional executable.",
     )
     parser.add_argument(

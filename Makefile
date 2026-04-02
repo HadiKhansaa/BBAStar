@@ -2,7 +2,7 @@
 
 BIN_DIR := bin
 SRC_DIR := src
-INC_DIR := include
+INC_DIR := Include
 
 TARGET := astar_bidirectional
 TARGET_DEBUG := astar_bidirectional_debug
@@ -11,7 +11,7 @@ UNIDIRECTIONAL_TARGET_DEBUG := astar_unidirectional_debug
 
 CUDA_ARCH ?= sm_89
 NVCC ?= nvcc
-HOST_COMPILER ?= cl
+HOST_COMPILER ?= g++
 
 BIDIRECTIONAL_SOURCES := \
 	$(SRC_DIR)/main_astar_bidirectional.cu \
@@ -23,14 +23,14 @@ UNIDIRECTIONAL_SOURCES := \
 	$(SRC_DIR)/unidirectional_astar.cu \
 	$(SRC_DIR)/grid_generation.cu
 
-NVCC_FLAGS := -I $(INC_DIR) -ccbin="$(HOST_COMPILER)" -arch=$(CUDA_ARCH)
+NVCC_FLAGS := -I $(INC_DIR) -ccbin=$(HOST_COMPILER) -arch=$(CUDA_ARCH)
 RELEASE_FLAGS := -O3 -use_fast_math
 DEBUG_FLAGS := -G -g -DDEBUG
 
-TARGET_PATH := $(BIN_DIR)/$(TARGET).exe
-TARGET_DEBUG_PATH := $(BIN_DIR)/$(TARGET_DEBUG).exe
-UNIDIRECTIONAL_TARGET_PATH := $(BIN_DIR)/$(UNIDIRECTIONAL_TARGET).exe
-UNIDIRECTIONAL_TARGET_DEBUG_PATH := $(BIN_DIR)/$(UNIDIRECTIONAL_TARGET_DEBUG).exe
+TARGET_PATH := $(BIN_DIR)/$(TARGET)
+TARGET_DEBUG_PATH := $(BIN_DIR)/$(TARGET_DEBUG)
+UNIDIRECTIONAL_TARGET_PATH := $(BIN_DIR)/$(UNIDIRECTIONAL_TARGET)
+UNIDIRECTIONAL_TARGET_DEBUG_PATH := $(BIN_DIR)/$(UNIDIRECTIONAL_TARGET_DEBUG)
 
 .PHONY: all bidirectional bidirectional_debug unidirectional unidirectional_debug debug clean help
 
@@ -47,7 +47,7 @@ help:
 	@echo
 	@echo Optional variables:
 	@echo   CUDA_ARCH=sm_89       Set the target GPU architecture passed to nvcc.
-	@echo   HOST_COMPILER=cl      Override the MSVC host compiler command.
+	@echo   HOST_COMPILER=g++     Override the GCC-compatible host compiler command.
 
 bidirectional: $(TARGET_PATH)
 
@@ -60,7 +60,7 @@ bidirectional_debug: $(TARGET_DEBUG_PATH)
 unidirectional_debug: $(UNIDIRECTIONAL_TARGET_DEBUG_PATH)
 
 $(BIN_DIR):
-	mkdir $(BIN_DIR) 2>NUL || echo Bin directory already exists.
+	mkdir -p $(BIN_DIR)
 
 $(TARGET_PATH): $(BIDIRECTIONAL_SOURCES) | $(BIN_DIR)
 	$(NVCC) $(NVCC_FLAGS) $(RELEASE_FLAGS) -o $@ $^
@@ -75,11 +75,11 @@ $(UNIDIRECTIONAL_TARGET_DEBUG_PATH): $(UNIDIRECTIONAL_SOURCES) | $(BIN_DIR)
 	$(NVCC) $(NVCC_FLAGS) $(DEBUG_FLAGS) -o $@ $^
 
 clean:
-	del /F /Q $(BIN_DIR)\$(TARGET).exe       2>NUL || echo Nothing to clean.
-	del /F /Q $(BIN_DIR)\$(TARGET_DEBUG).exe 2>NUL || echo Nothing to clean.
-	del /F /Q $(BIN_DIR)\$(UNIDIRECTIONAL_TARGET).exe       2>NUL || echo Nothing to clean.
-	del /F /Q $(BIN_DIR)\$(UNIDIRECTIONAL_TARGET_DEBUG).exe 2>NUL || echo Nothing to clean.
-	del /F /Q $(BIN_DIR)\*.pdb               2>NUL || echo Nothing to clean.
-	del /F /Q $(BIN_DIR)\*.exp               2>NUL || echo Nothing to clean.
-	del /F /Q $(BIN_DIR)\*.lib               2>NUL || echo Nothing to clean.
-	del /F /Q $(BIN_DIR)\*.obj               2>NUL || echo Nothing to clean.
+	rm -f $(TARGET_PATH) \
+		$(TARGET_DEBUG_PATH) \
+		$(UNIDIRECTIONAL_TARGET_PATH) \
+		$(UNIDIRECTIONAL_TARGET_DEBUG_PATH) \
+		$(BIN_DIR)/*.pdb \
+		$(BIN_DIR)/*.exp \
+		$(BIN_DIR)/*.lib \
+		$(BIN_DIR)/*.obj
